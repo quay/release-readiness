@@ -1,0 +1,30 @@
+{{define "title"}}Readiness{{end}}
+{{define "content"}}
+<h1>Release Readiness</h1>
+
+{{if not .Versions}}
+<p>No releases recorded yet.</p>
+{{else}}
+<table>
+    <thead>
+        <tr>
+            <th>Version</th>
+            <th>Components</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .VersionSummaries}}
+        <tr>
+            <td><a href="/readiness/{{.Version}}">{{.Version}}</a></td>
+            <td>{{.BuildCount}} builds</td>
+            <td>
+                {{if .Ready}}<span class="badge badge-passed">ready</span>
+                {{else}}<span class="badge badge-failed">{{.BlockCount}} blocked</span>{{end}}
+            </td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+{{end}}
+{{end}}

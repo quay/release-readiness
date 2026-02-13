@@ -1,0 +1,42 @@
+{{define "title"}}Readiness {{.Matrix.Version}}{{end}}
+{{define "content"}}
+<h1>Release Readiness: {{.Matrix.Version}}</h1>
+
+{{if .Matrix.Ready}}
+<div class="banner banner-ready">READY: All required suites passing for all components.</div>
+{{else}}
+<div class="banner banner-blocked">NOT READY: {{.Matrix.BlockCount}} of {{len .Matrix.Rows}} components blocked.</div>
+{{end}}
+
+<table>
+    <thead>
+        <tr>
+            <th>Component</th>
+            {{range .Matrix.Suites}}
+            <th>{{.Name}}</th>
+            {{end}}
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Matrix.Rows}}
+        <tr>
+            <td>
+                {{if .Build}}<a href="/builds/{{.Build.ID}}">{{.Component.Name}}</a>
+                {{else}}{{.Component.Name}}{{end}}
+            </td>
+            {{range .Cells}}
+            <td>
+                {{if .TestRunID}}<a href="/builds/{{$.Matrix.Version}}"><span class="badge badge-{{.Status}}">{{.Status}}</span></a>
+                {{else}}<span class="badge badge-{{.Status}}">{{.Status}}</span>{{end}}
+            </td>
+            {{end}}
+            <td>
+                {{if .Ready}}<span class="badge badge-passed">ready</span>
+                {{else}}<span class="badge badge-failed">blocked</span>{{end}}
+            </td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+{{end}}

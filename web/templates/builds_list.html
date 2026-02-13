@@ -1,0 +1,62 @@
+{{define "title"}}Builds{{end}}
+{{define "content"}}
+<h1>Builds</h1>
+
+<form class="filters" method="get" action="/builds">
+    <label>Component:</label>
+    <select name="component">
+        <option value="">All</option>
+        {{range .Components}}
+        <option value="{{.Name}}" {{if eq .Name $.Filter.Component}}selected{{end}}>{{.Name}}</option>
+        {{end}}
+    </select>
+    <label>Version:</label>
+    <input type="text" name="version" value="{{.Filter.Version}}" placeholder="e.g. 3.16.2">
+    <label>Status:</label>
+    <select name="status">
+        <option value="">All</option>
+        <option value="pending" {{if eq .Filter.Status "pending"}}selected{{end}}>pending</option>
+        <option value="passed" {{if eq .Filter.Status "passed"}}selected{{end}}>passed</option>
+        <option value="failed" {{if eq .Filter.Status "failed"}}selected{{end}}>failed</option>
+    </select>
+    <button type="submit">Filter</button>
+</form>
+
+{{if not .Builds}}
+<p>No builds match the current filters.</p>
+{{else}}
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Component</th>
+            <th>Version</th>
+            <th>Git SHA</th>
+            <th>Status</th>
+            <th>Created</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Builds}}
+        <tr>
+            <td><a href="/builds/{{.ID}}">#{{.ID}}</a></td>
+            <td>{{.Component}}</td>
+            <td>{{.Version}}</td>
+            <td class="sha">{{slice .GitSHA 0 12}}</td>
+            <td><span class="badge badge-{{.Status}}">{{.Status}}</span></td>
+            <td>{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+
+<div class="pagination">
+    {{if gt .Filter.Offset 0}}
+    <a href="/builds?component={{.Filter.Component}}&version={{.Filter.Version}}&status={{.Filter.Status}}&offset={{.PrevOffset}}">&laquo; Previous</a>
+    {{end}}
+    {{if .HasNext}}
+    <a href="/builds?component={{.Filter.Component}}&version={{.Filter.Version}}&status={{.Filter.Status}}&offset={{.NextOffset}}">Next &raquo;</a>
+    {{end}}
+</div>
+{{end}}
+{{end}}

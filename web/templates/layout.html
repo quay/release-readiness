@@ -1,0 +1,23 @@
+{{define "layout"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{template "title" .}} - Quay Build Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <nav>
+        <a href="/" class="brand"><img src="/static/logo.svg" alt="Quay" class="brand-logo">Build Dashboard</a>
+        <a href="/">Dashboard</a>
+        <a href="/builds">Builds</a>
+        <a href="/readiness">Readiness</a>
+        <a href="/config">Config</a>
+    </nav>
+    <div class="container">
+        {{template "content" .}}
+    </div>
+</body>
+</html>
+{{end}}

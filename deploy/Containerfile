@@ -1,0 +1,17 @@
+FROM registry.access.redhat.com/ubi9/go-toolset:1.24 AS builder
+
+WORKDIR /opt/app-root/src
+COPY --chown=1001:0 go.mod go.sum ./
+RUN go mod download
+COPY --chown=1001:0 . .
+RUN CGO_ENABLED=0 go build -o /opt/app-root/dashboard ./cmd/dashboard/
+
+FROM registry.access.redhat.com/ubi9-micro:latest
+
+COPY --from=builder /opt/app-root/dashboard /usr/local/bin/dashboard
+
+EXPOSE 8080
+VOLUME /data
+
+ENTRYPOINT ["dashboard"]
+CMD ["serve", "-addr", ":8080", "-db", "/data/dashboard.db"]

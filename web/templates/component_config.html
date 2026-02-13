@@ -1,0 +1,42 @@
+{{define "title"}}Configuration{{end}}
+{{define "content"}}
+<h1>Suite-to-Component Mapping</h1>
+<p>Configure which test suites apply to each component. Check "Required" to make the suite block release readiness.</p>
+
+<form method="post" action="/config">
+<table>
+    <thead>
+        <tr>
+            <th>Component</th>
+            {{range .Suites}}
+            <th>{{.Name}}</th>
+            {{end}}
+        </tr>
+    </thead>
+    <tbody>
+        {{range $comp := .Components}}
+        <tr>
+            <td>{{$comp.Name}}</td>
+            {{range $suite := $.Suites}}
+            <td>
+                <div class="config-grid">
+                    <label>
+                        <input type="checkbox" name="map_{{$comp.Name}}_{{$suite.Name}}" value="1"
+                            {{if isMapped $comp $suite}}checked{{end}}>
+                        mapped
+                    </label>
+                    <label>
+                        <input type="checkbox" name="req_{{$comp.Name}}_{{$suite.Name}}" value="1"
+                            {{if isRequired $comp $suite}}checked{{end}}>
+                        required
+                    </label>
+                </div>
+            </td>
+            {{end}}
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+<button type="submit">Save Configuration</button>
+</form>
+{{end}}

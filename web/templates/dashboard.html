@@ -1,0 +1,30 @@
+{{define "title"}}Dashboard{{end}}
+{{define "content"}}
+<h1>Latest Builds</h1>
+{{if not .Builds}}
+<p>No builds recorded yet. Use <code>dashboard report build</code> or <code>dashboard report snapshot</code> to submit build data.</p>
+{{else}}
+<table>
+    <thead>
+        <tr>
+            <th>Component</th>
+            <th>Version</th>
+            <th>Git SHA</th>
+            <th>Status</th>
+            <th>Created</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Builds}}
+        <tr>
+            <td><a href="/builds/{{.ID}}">{{.Component}}</a></td>
+            <td>{{.Version}}</td>
+            <td class="sha">{{slice .GitSHA 0 12}}</td>
+            <td><span class="badge badge-{{.Status}}">{{.Status}}</span></td>
+            <td>{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+{{end}}
+{{end}}

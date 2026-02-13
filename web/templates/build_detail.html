@@ -1,0 +1,51 @@
+{{define "title"}}Build #{{.Build.ID}}{{end}}
+{{define "content"}}
+<h1>Build #{{.Build.ID}}: {{.Build.Component}}</h1>
+
+<table class="meta-table">
+    <tr><td>Component</td><td>{{.Build.Component}}</td></tr>
+    <tr><td>Version</td><td>{{.Build.Version}}</td></tr>
+    <tr><td>Git SHA</td><td class="sha">{{.Build.GitSHA}}</td></tr>
+    {{if .Build.GitBranch}}<tr><td>Branch</td><td>{{.Build.GitBranch}}</td></tr>{{end}}
+    <tr><td>Image</td><td class="sha">{{.Build.ImageURL}}</td></tr>
+    {{if .Build.ImageDigest}}<tr><td>Digest</td><td class="sha">{{.Build.ImageDigest}}</td></tr>{{end}}
+    {{if .Build.PipelineRun}}<tr><td>Pipeline Run</td><td>{{.Build.PipelineRun}}</td></tr>{{end}}
+    {{if .Build.SnapshotName}}<tr><td>Snapshot</td><td>{{.Build.SnapshotName}}</td></tr>{{end}}
+    <tr><td>Status</td><td><span class="badge badge-{{.Build.Status}}">{{.Build.Status}}</span></td></tr>
+    <tr><td>Created</td><td>{{.Build.CreatedAt.Format "2006-01-02 15:04:05 UTC"}}</td></tr>
+</table>
+
+<h2>Test Results</h2>
+{{if not .Build.TestRuns}}
+<p>No test results submitted yet.</p>
+{{else}}
+{{range .Build.TestRuns}}
+<details {{if eq .Status "failed"}}open{{end}}>
+    <summary>
+        <span class="badge badge-{{.Status}}">{{.Status}}</span>
+        {{.Suite}} &mdash; {{.Passed}}/{{.Total}} passed
+        {{if .Failed}}, {{.Failed}} failed{{end}}
+        {{if .Skipped}}, {{.Skipped}} skipped{{end}}
+        ({{printf "%.1f" .DurationSec}}s)
+    </summary>
+    {{if .TestCases}}
+    <ul class="test-case-list">
+        {{range .TestCases}}
+        <li>
+            <span class="badge badge-{{.Status}}">{{.Status}}</span>
+            {{.Name}}
+            {{if .FailureMsg}}
+            <details>
+                <summary>Failure details</summary>
+                <pre>{{.FailureMsg}}
+{{.FailureText}}</pre>
+            </details>
+            {{end}}
+        </li>
+        {{end}}
+    </ul>
+    {{end}}
+</details>
+{{end}}
+{{end}}
+{{end}}
