@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -24,7 +23,7 @@ func setupTestServer(t *testing.T) *Server {
 		database.Close()
 		os.Remove(dbPath)
 	})
-	return New(database, ":0")
+	return New(database, nil, ":0")
 }
 
 func TestHealthEndpoint(t *testing.T) {
@@ -44,143 +43,116 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 }
 
-func TestBuildLifecycle(t *testing.T) {
+func TestListComponents(t *testing.T) {
 	srv := setupTestServer(t)
 
-	// Create a build
-	body := `{"component":"quay","version":"3.16.2","git_sha":"abc123def456","image_url":"quay.io/test"}`
-	req := httptest.NewRequest("POST", "/api/v1/builds", bytes.NewBufferString(body))
-	w := httptest.NewRecorder()
-	srv.http.Handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusCreated {
-		t.Fatalf("create build: got %d, body: %s", w.Code, w.Body.String())
+	// Ensure a component exists
+	if _, err := srv.db.EnsureComponent("quay"); err != nil {
+		t.Fatalf("ensure component: %v", err)
 	}
 
-	var build model.Build
-	json.NewDecoder(w.Body).Decode(&build)
-	if build.Component != "quay" {
-		t.Errorf("component: got %q", build.Component)
-	}
-	if build.Status != "pending" {
-		t.Errorf("status: got %q, want pending", build.Status)
-	}
-
-	// Get build
-	req = httptest.NewRequest("GET", "/api/v1/builds/1", nil)
-	w = httptest.NewRecorder()
-	srv.http.Handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("get build: got %d", w.Code)
-	}
-
-	// Submit test results
-	results := `{
-		"suite":"ui-cypress",
-		"total":3,"passed":2,"failed":1,"skipped":0,"duration_sec":10.5,
-		"test_cases":[
-			{"name":"test1","status":"passed","duration_sec":3},
-			{"name":"test2","status":"passed","duration_sec":4},
-			{"name":"test3","status":"failed","failure_msg":"oops","duration_sec":3.5}
-		]
-	}`
-	req = httptest.NewRequest("POST", "/api/v1/builds/1/results", bytes.NewBufferString(results))
-	w = httptest.NewRecorder()
-	srv.http.Handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusCreated {
-		t.Fatalf("submit results: got %d, body: %s", w.Code, w.Body.String())
-	}
-
-	// Verify build status updated to failed
-	req = httptest.NewRequest("GET", "/api/v1/builds/1", nil)
-	w = httptest.NewRecorder()
-	srv.http.Handler.ServeHTTP(w, req)
-
-	json.NewDecoder(w.Body).Decode(&build)
-	if build.Status != "failed" {
-		t.Errorf("status after results: got %q, want failed", build.Status)
-	}
-	if len(build.TestRuns) != 1 {
-		t.Fatalf("test runs: got %d, want 1", len(build.TestRuns))
-	}
-	if build.TestRuns[0].Failed != 1 {
-		t.Errorf("failed count: got %d, want 1", build.TestRuns[0].Failed)
-	}
-}
-
-func TestListBuildsWithFilters(t *testing.T) {
-	srv := setupTestServer(t)
-
-	// Create two builds for different components
-	for _, comp := range []string{"quay", "clair"} {
-		body, _ := json.Marshal(map[string]string{
-			"component": comp, "version": "3.16.2",
-			"git_sha": "abc123", "image_url": "quay.io/" + comp,
-		})
-		req := httptest.NewRequest("POST", "/api/v1/builds", bytes.NewReader(body))
-		w := httptest.NewRecorder()
-		srv.http.Handler.ServeHTTP(w, req)
-		if w.Code != http.StatusCreated {
-			t.Fatalf("create %s: %d %s", comp, w.Code, w.Body.String())
-		}
-	}
-
-	// List all
-	req := httptest.NewRequest("GET", "/api/v1/builds", nil)
-	w := httptest.NewRecorder()
-	srv.http.Handler.ServeHTTP(w, req)
-
-	var builds []model.Build
-	json.NewDecoder(w.Body).Decode(&builds)
-	if len(builds) != 2 {
-		t.Errorf("all builds: got %d, want 2", len(builds))
-	}
-
-	// Filter by component
-	req = httptest.NewRequest("GET", "/api/v1/builds?component=quay", nil)
-	w = httptest.NewRecorder()
-	srv.http.Handler.ServeHTTP(w, req)
-
-	json.NewDecoder(w.Body).Decode(&builds)
-	if len(builds) != 1 {
-		t.Errorf("filtered builds: got %d, want 1", len(builds))
-	}
-}
-
-func TestComponentsAndSuites(t *testing.T) {
-	srv := setupTestServer(t)
-
-	// List seeded components
 	req := httptest.NewRequest("GET", "/api/v1/components", nil)
 	w := httptest.NewRecorder()
 	srv.http.Handler.ServeHTTP(w, req)
 
 	var components []model.Component
 	json.NewDecoder(w.Body).Decode(&components)
-	if len(components) != 10 {
-		t.Errorf("components: got %d, want 10", len(components))
+	if len(components) < 1 {
+		t.Errorf("components: got %d, want >= 1", len(components))
+	}
+}
+
+func TestListSnapshots(t *testing.T) {
+	srv := setupTestServer(t)
+
+	_, err := srv.db.CreateSnapshot("quay-v3-17", "quay-v3-17-20260213-000", "quay", "abc123", "pr-1", true, false, "")
+	if err != nil {
+		t.Fatalf("create snapshot: %v", err)
 	}
 
-	// List seeded suites
-	req = httptest.NewRequest("GET", "/api/v1/suites", nil)
-	w = httptest.NewRecorder()
-	srv.http.Handler.ServeHTTP(w, req)
-
-	var suites []model.Suite
-	json.NewDecoder(w.Body).Decode(&suites)
-	if len(suites) != 5 {
-		t.Errorf("suites: got %d, want 5", len(suites))
-	}
-
-	// Map suite to component
-	body := `{"suite":"ui-cypress","required":true}`
-	req = httptest.NewRequest("POST", "/api/v1/components/quay/suites", bytes.NewBufferString(body))
-	w = httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/snapshots", nil)
+	w := httptest.NewRecorder()
 	srv.http.Handler.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("map suite: got %d, body: %s", w.Code, w.Body.String())
+		t.Fatalf("list snapshots: got %d, body: %s", w.Code, w.Body.String())
+	}
+
+	var snapshots []model.SnapshotRecord
+	json.NewDecoder(w.Body).Decode(&snapshots)
+	if len(snapshots) != 1 {
+		t.Errorf("snapshots: got %d, want 1", len(snapshots))
+	}
+	if snapshots[0].Application != "quay-v3-17" {
+		t.Errorf("application: got %q, want %q", snapshots[0].Application, "quay-v3-17")
+	}
+}
+
+func TestGetSnapshot(t *testing.T) {
+	srv := setupTestServer(t)
+
+	snap, err := srv.db.CreateSnapshot("quay-v3-17", "quay-v3-17-20260213-001", "quay", "def456", "pr-2", false, false, "tests failing")
+	if err != nil {
+		t.Fatalf("create snapshot: %v", err)
+	}
+
+	if err := srv.db.CreateSnapshotTestResult(snap.ID, "operator-ginkgo", "failed", "pr-run-1", 100, 90, 10, 0, 120.5); err != nil {
+		t.Fatalf("create test result: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/v1/snapshots/quay-v3-17-20260213-001", nil)
+	w := httptest.NewRecorder()
+	srv.http.Handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("get snapshot: got %d, body: %s", w.Code, w.Body.String())
+	}
+
+	var got model.SnapshotRecord
+	json.NewDecoder(w.Body).Decode(&got)
+	if got.Name != "quay-v3-17-20260213-001" {
+		t.Errorf("name: got %q, want %q", got.Name, "quay-v3-17-20260213-001")
+	}
+	if got.TestsPassed {
+		t.Error("tests_passed: got true, want false")
+	}
+	if len(got.TestResults) != 1 {
+		t.Fatalf("test results: got %d, want 1", len(got.TestResults))
+	}
+	if got.TestResults[0].Scenario != "operator-ginkgo" {
+		t.Errorf("scenario: got %q, want %q", got.TestResults[0].Scenario, "operator-ginkgo")
+	}
+}
+
+func TestListApplications(t *testing.T) {
+	srv := setupTestServer(t)
+
+	_, err := srv.db.CreateSnapshot("quay-v3-17", "snap-1", "quay", "abc", "pr-1", true, false, "")
+	if err != nil {
+		t.Fatalf("create snapshot 1: %v", err)
+	}
+	_, err = srv.db.CreateSnapshot("quay-v3-17", "snap-2", "quay", "def", "pr-2", false, false, "")
+	if err != nil {
+		t.Fatalf("create snapshot 2: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/v1/applications", nil)
+	w := httptest.NewRecorder()
+	srv.http.Handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("list applications: got %d, body: %s", w.Code, w.Body.String())
+	}
+
+	var summaries []model.ApplicationSummary
+	json.NewDecoder(w.Body).Decode(&summaries)
+	if len(summaries) != 1 {
+		t.Fatalf("applications: got %d, want 1", len(summaries))
+	}
+	if summaries[0].SnapshotCount != 2 {
+		t.Errorf("snapshot count: got %d, want 2", summaries[0].SnapshotCount)
+	}
+	if summaries[0].LatestSnapshot.Name != "snap-2" {
+		t.Errorf("latest snapshot: got %q, want %q", summaries[0].LatestSnapshot.Name, "snap-2")
 	}
 }

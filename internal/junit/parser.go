@@ -4,8 +4,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"os"
-
-	"github.com/quay/build-dashboard/internal/model"
 )
 
 type xmlTestSuites struct {
@@ -42,13 +40,22 @@ type xmlSkipped struct {
 	Message string `xml:"message,attr"`
 }
 
+type TestCase struct {
+	Name        string  `json:"name"`
+	ClassName   string  `json:"classname"`
+	DurationSec float64 `json:"duration_sec"`
+	Status      string  `json:"status"`
+	FailureMsg  string  `json:"failure_msg,omitempty"`
+	FailureText string  `json:"failure_text,omitempty"`
+}
+
 type Result struct {
 	Total       int
 	Passed      int
 	Failed      int
 	Skipped     int
 	DurationSec float64
-	TestCases   []model.TestCase
+	TestCases   []TestCase
 }
 
 // ParseFile parses a JUnit XML file and returns aggregated results.
@@ -82,7 +89,7 @@ func aggregate(suites []xmlTestSuite) *Result {
 	for _, s := range suites {
 		r.DurationSec += s.Time
 		for _, tc := range s.TestCases {
-			c := model.TestCase{
+			c := TestCase{
 				Name:        tc.Name,
 				ClassName:   tc.ClassName,
 				DurationSec: tc.Time,

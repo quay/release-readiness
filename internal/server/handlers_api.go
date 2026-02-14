@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/quay/build-dashboard/internal/model"
 )
@@ -29,241 +30,145 @@ func (s *Server) handleListComponents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, components)
 }
 
-func (s *Server) handleCreateComponent(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("name is required"))
-		return
-	}
-	comp, err := s.db.CreateComponent(req.Name, req.Description)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, comp)
-}
+// --- Snapshots ---
 
-func (s *Server) handleMapSuite(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	var req struct {
-		Suite    string `json:"suite"`
-		Required bool   `json:"required"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if req.Suite == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("suite is required"))
-		return
-	}
-	if err := s.db.MapSuiteToComponent(name, req.Suite, req.Required); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// --- Suites ---
-
-func (s *Server) handleListSuites(w http.ResponseWriter, r *http.Request) {
-	suites, err := s.db.ListSuites()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, suites)
-}
-
-func (s *Server) handleCreateSuite(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("name is required"))
-		return
-	}
-	suite, err := s.db.CreateSuite(req.Name, req.Description)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, suite)
-}
-
-// --- Builds ---
-
-func (s *Server) handleCreateBuild(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Component    string `json:"component"`
-		Version      string `json:"version"`
-		GitSHA       string `json:"git_sha"`
-		GitBranch    string `json:"git_branch"`
-		ImageURL     string `json:"image_url"`
-		ImageDigest  string `json:"image_digest"`
-		PipelineRun  string `json:"pipeline_run"`
-		SnapshotName string `json:"snapshot_name"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if req.Component == "" || req.Version == "" || req.GitSHA == "" || req.ImageURL == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("component, version, git_sha, and image_url are required"))
-		return
-	}
-	build, err := s.db.CreateBuild(req.Component, req.Version, req.GitSHA, req.GitBranch,
-		req.ImageURL, req.ImageDigest, req.PipelineRun, req.SnapshotName)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, build)
-}
-
-func (s *Server) handleListBuilds(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleListSnapshots(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
 	if limit <= 0 {
 		limit = 50
 	}
-	builds, err := s.db.ListBuilds(q.Get("component"), q.Get("version"), q.Get("status"), limit, offset)
+	snapshots, err := s.db.ListSnapshots(q.Get("application"), limit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, builds)
+	writeJSON(w, http.StatusOK, snapshots)
 }
 
-func (s *Server) handleGetBuild(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+func (s *Server) handleGetSnapshot(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	snap, err := s.db.GetSnapshotByName(name)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid build id"))
+		writeError(w, http.StatusNotFound, fmt.Errorf("snapshot not found"))
 		return
 	}
-	build, err := s.db.GetBuild(id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, fmt.Errorf("build not found"))
-		return
-	}
-	writeJSON(w, http.StatusOK, build)
+	writeJSON(w, http.StatusOK, snap)
 }
 
-func (s *Server) handleLatestBuild(w http.ResponseWriter, r *http.Request) {
+// --- Applications ---
+
+func (s *Server) handleListApplications(w http.ResponseWriter, r *http.Request) {
+	summaries, err := s.db.LatestSnapshotPerApplication()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, summaries)
+}
+
+// --- JIRA / Releases ---
+
+func (s *Server) handleListIssues(w http.ResponseWriter, r *http.Request) {
+	app := r.PathValue("app")
+	fixVersion := s.appToFixVersion(app)
+	if fixVersion == "" {
+		writeError(w, http.StatusNotFound, fmt.Errorf("no fixVersion mapping for %q", app))
+		return
+	}
+
 	q := r.URL.Query()
-	component := q.Get("component")
-	version := q.Get("version")
-	if component == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("component is required"))
-		return
-	}
-	build, err := s.db.GetLatestBuild(component, version)
-	if err != nil {
-		writeError(w, http.StatusNotFound, fmt.Errorf("build not found"))
-		return
-	}
-	writeJSON(w, http.StatusOK, build)
-}
-
-// --- Test Results ---
-
-func (s *Server) handleSubmitResults(w http.ResponseWriter, r *http.Request) {
-	buildID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid build id"))
-		return
-	}
-	var req struct {
-		Suite       string           `json:"suite"`
-		Environment string           `json:"environment"`
-		PipelineRun string           `json:"pipeline_run"`
-		Total       int              `json:"total"`
-		Passed      int              `json:"passed"`
-		Failed      int              `json:"failed"`
-		Skipped     int              `json:"skipped"`
-		DurationSec float64          `json:"duration_sec"`
-		TestCases   []model.TestCase `json:"test_cases"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if req.Suite == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("suite is required"))
-		return
-	}
-
-	status := "passed"
-	if req.Failed > 0 {
-		status = "failed"
-	}
-
-	run, err := s.db.CreateTestRun(buildID, req.Suite, req.Total, req.Passed, req.Failed,
-		req.Skipped, req.DurationSec, status, req.Environment, req.PipelineRun, req.TestCases)
+	issues, err := s.db.ListJiraIssues(fixVersion, q.Get("type"), q.Get("status"), q.Get("label"))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-
-	// Recompute build status
-	if err := s.db.RecomputeBuildStatus(buildID); err != nil {
-		log.Printf("recompute build status: %v", err)
+	if issues == nil {
+		issues = []model.JiraIssueRecord{}
 	}
-
-	writeJSON(w, http.StatusCreated, run)
+	writeJSON(w, http.StatusOK, issues)
 }
 
-func (s *Server) handleGetResults(w http.ResponseWriter, r *http.Request) {
-	buildID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid build id"))
+func (s *Server) handleGetIssueSummary(w http.ResponseWriter, r *http.Request) {
+	app := r.PathValue("app")
+	fixVersion := s.appToFixVersion(app)
+	if fixVersion == "" {
+		writeError(w, http.StatusNotFound, fmt.Errorf("no fixVersion mapping for %q", app))
 		return
 	}
-	runs, err := s.db.ListTestRuns(buildID)
+
+	summary, err := s.db.GetIssueSummary(fixVersion)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, runs)
+	writeJSON(w, http.StatusOK, summary)
 }
 
-func (s *Server) handleGetTestRun(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid test run id"))
+func (s *Server) handleGetReleaseVersion(w http.ResponseWriter, r *http.Request) {
+	app := r.PathValue("app")
+	fixVersion := s.appToFixVersion(app)
+	if fixVersion == "" {
+		writeError(w, http.StatusNotFound, fmt.Errorf("no fixVersion mapping for %q", app))
 		return
 	}
-	run, err := s.db.GetTestRun(id)
+
+	version, err := s.db.GetReleaseVersion(fixVersion)
 	if err != nil {
-		writeError(w, http.StatusNotFound, fmt.Errorf("test run not found"))
+		writeError(w, http.StatusNotFound, fmt.Errorf("version %q not found", fixVersion))
 		return
 	}
-	writeJSON(w, http.StatusOK, run)
+	writeJSON(w, http.StatusOK, version)
 }
 
-// --- Readiness ---
-
-func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
-	version := r.PathValue("version")
-	matrix, err := s.db.GetReadiness(version)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+// appToFixVersion derives a JIRA fixVersion from an S3 application prefix.
+// Convention: "quay-v3-16" → "3.16", "quay-v3-16-2" → "3.16.2"
+// Falls back to the configured version mapping if available.
+func (s *Server) appToFixVersion(app string) string {
+	if s.fixVersions != nil {
+		if v, ok := s.fixVersions[app]; ok {
+			return v
+		}
 	}
-	writeJSON(w, http.StatusOK, matrix)
+	return deriveFixVersion(app)
+}
+
+// deriveFixVersion extracts a version string from an application prefix.
+// Examples: "quay-v3-16" → "3.16", "quay-v3-16-2" → "3.16.2"
+func deriveFixVersion(app string) string {
+	// Find "v" followed by version digits
+	parts := strings.Split(app, "-")
+	var versionParts []string
+	inVersion := false
+	for _, p := range parts {
+		if !inVersion {
+			if len(p) > 0 && p[0] == 'v' {
+				inVersion = true
+				versionParts = append(versionParts, p[1:])
+			}
+			continue
+		}
+		// Only include numeric parts
+		if isNumeric(p) {
+			versionParts = append(versionParts, p)
+		} else {
+			break
+		}
+	}
+	if len(versionParts) == 0 {
+		return ""
+	}
+	return strings.Join(versionParts, ".")
+}
+
+func isNumeric(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return len(s) > 0
 }
 
 // --- Helpers ---

@@ -3,47 +3,46 @@ package server
 import (
 	"io/fs"
 	"net/http"
+	"strings"
 
 	"github.com/quay/build-dashboard/web"
 )
 
 func (s *Server) registerRoutes(mux *http.ServeMux) {
-	// Static files — strip the "static" prefix from the embedded FS
-	staticSub, _ := fs.Sub(web.StaticFS, "static")
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(staticSub)))
-
 	// Health
 	mux.HandleFunc("GET /api/v1/health", s.handleHealth)
 
 	// Components API
 	mux.HandleFunc("GET /api/v1/components", s.handleListComponents)
-	mux.HandleFunc("POST /api/v1/components", s.handleCreateComponent)
-	mux.HandleFunc("POST /api/v1/components/{name}/suites", s.handleMapSuite)
 
-	// Suites API
-	mux.HandleFunc("GET /api/v1/suites", s.handleListSuites)
-	mux.HandleFunc("POST /api/v1/suites", s.handleCreateSuite)
+	// Snapshots API
+	mux.HandleFunc("GET /api/v1/snapshots", s.handleListSnapshots)
+	mux.HandleFunc("GET /api/v1/snapshots/{name}", s.handleGetSnapshot)
 
-	// Builds API
-	mux.HandleFunc("POST /api/v1/builds", s.handleCreateBuild)
-	mux.HandleFunc("GET /api/v1/builds", s.handleListBuilds)
-	mux.HandleFunc("GET /api/v1/builds/latest", s.handleLatestBuild)
-	mux.HandleFunc("GET /api/v1/builds/{id}", s.handleGetBuild)
+	// Applications API
+	mux.HandleFunc("GET /api/v1/applications", s.handleListApplications)
 
-	// Test Results API
-	mux.HandleFunc("POST /api/v1/builds/{id}/results", s.handleSubmitResults)
-	mux.HandleFunc("GET /api/v1/builds/{id}/results", s.handleGetResults)
-	mux.HandleFunc("GET /api/v1/test-runs/{id}", s.handleGetTestRun)
+	// JIRA / Release API
+	mux.HandleFunc("GET /api/v1/releases/{app}/issues", s.handleListIssues)
+	mux.HandleFunc("GET /api/v1/releases/{app}/issues/summary", s.handleGetIssueSummary)
+	mux.HandleFunc("GET /api/v1/releases/{app}/version", s.handleGetReleaseVersion)
 
-	// Readiness API
-	mux.HandleFunc("GET /api/v1/readiness/{version}", s.handleReadiness)
+	// SPA — serve React app from embedded dist/
+	distSub, _ := fs.Sub(web.DistFS, "dist")
+	fileServer := http.FileServer(http.FS(distSub))
 
-	// UI routes
-	mux.HandleFunc("GET /{$}", s.handleDashboardPage)
-	mux.HandleFunc("GET /builds/{id}", s.handleBuildDetailPage)
-	mux.HandleFunc("GET /builds", s.handleBuildsListPage)
-	mux.HandleFunc("GET /readiness", s.handleReadinessListPage)
-	mux.HandleFunc("GET /readiness/{version}", s.handleReadinessPage)
-	mux.HandleFunc("GET /config", s.handleConfigPage)
-	mux.HandleFunc("POST /config", s.handleConfigUpdate)
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		// Serve static assets directly if they exist
+		path := strings.TrimPrefix(r.URL.Path, "/")
+		if path != "" {
+			if f, err := distSub.Open(path); err == nil {
+				f.Close()
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+		}
+		// SPA fallback: serve index.html for all other routes
+		r.URL.Path = "/"
+		fileServer.ServeHTTP(w, r)
+	})
 }
