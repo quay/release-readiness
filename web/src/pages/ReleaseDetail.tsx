@@ -501,7 +501,7 @@ function IssuesTable({ issues }: { issues: JiraIssue[] }) {
         case 1: // Type
           cmp = a.issue_type.localeCompare(b.issue_type);
           break;
-        case 2: // Priority
+        case 3: // Priority
           cmp = (priorityWeight[a.priority.toLowerCase()] ?? 5) - (priorityWeight[b.priority.toLowerCase()] ?? 5);
           break;
         case 4: // Status
@@ -528,15 +528,15 @@ function IssuesTable({ issues }: { issues: JiraIssue[] }) {
   });
 
   return (
-    <Table variant="compact">
+    <Table variant="compact" style={{ tableLayout: "auto" }}>
       <Thead>
         <Tr>
-          <Th>Key</Th>
-          <Th sort={getSortParams(1)}>Type</Th>
-          <Th sort={getSortParams(2)}>Priority</Th>
+          <Th style={{ whiteSpace: "nowrap" }}>Key</Th>
+          <Th sort={getSortParams(1)} style={{ whiteSpace: "nowrap" }}>Type</Th>
           <Th>Summary</Th>
-          <Th sort={getSortParams(4)}>Status</Th>
-          <Th sort={getSortParams(5)}>Assignee</Th>
+          <Th sort={getSortParams(3)} style={{ whiteSpace: "nowrap", minWidth: "120px" }}>Priority</Th>
+          <Th sort={getSortParams(4)} style={{ whiteSpace: "nowrap", minWidth: "110px" }}>Status</Th>
+          <Th sort={getSortParams(5)} style={{ whiteSpace: "nowrap", minWidth: "140px" }}>Assignee</Th>
         </Tr>
       </Thead>
       <Tbody>
@@ -548,10 +548,10 @@ function IssuesTable({ issues }: { issues: JiraIssue[] }) {
               </a>
             </Td>
             <Td>{issue.issue_type}</Td>
+            <Td style={{ whiteSpace: "normal", wordBreak: "break-word" }}>{issue.summary}</Td>
             <Td>
               <PriorityLabel priority={issue.priority} />
             </Td>
-            <Td>{issue.summary}</Td>
             <Td>
               <StatusLabel status={issue.status} />
             </Td>
