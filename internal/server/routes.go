@@ -41,7 +41,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		path := strings.TrimPrefix(r.URL.Path, "/")
 		if path != "" {
 			if f, err := distSub.Open(path); err == nil {
-				f.Close()
+				_ = f.Close()
 				fileServer.ServeHTTP(w, r)
 				return
 			}

@@ -22,8 +22,8 @@ func setupTestServer(t *testing.T) *Server {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		database.Close()
-		os.Remove(dbPath)
+		_ = database.Close()
+		_ = os.Remove(dbPath)
 	})
 	return New(database, nil, ":0", "https://issues.redhat.com", slog.Default())
 }
@@ -39,7 +39,9 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 
 	var resp map[string]string
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
 	if resp["status"] != "healthy" {
 		t.Errorf("status: got %q, want healthy", resp["status"])
 	}
@@ -59,7 +61,9 @@ func TestListComponents(t *testing.T) {
 	srv.http.Handler.ServeHTTP(w, req)
 
 	var components []model.Component
-	json.NewDecoder(w.Body).Decode(&components)
+	if err := json.NewDecoder(w.Body).Decode(&components); err != nil {
+		t.Fatal(err)
+	}
 	if len(components) < 1 {
 		t.Errorf("components: got %d, want >= 1", len(components))
 	}
@@ -83,7 +87,9 @@ func TestListSnapshots(t *testing.T) {
 	}
 
 	var snapshots []model.SnapshotRecord
-	json.NewDecoder(w.Body).Decode(&snapshots)
+	if err := json.NewDecoder(w.Body).Decode(&snapshots); err != nil {
+		t.Fatal(err)
+	}
 	if len(snapshots) != 1 {
 		t.Errorf("snapshots: got %d, want 1", len(snapshots))
 	}
@@ -114,7 +120,9 @@ func TestGetSnapshot(t *testing.T) {
 	}
 
 	var got model.SnapshotRecord
-	json.NewDecoder(w.Body).Decode(&got)
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
 	if got.Name != "quay-v3-17-20260213-001" {
 		t.Errorf("name: got %q, want %q", got.Name, "quay-v3-17-20260213-001")
 	}
@@ -151,7 +159,9 @@ func TestListApplications(t *testing.T) {
 	}
 
 	var summaries []model.ApplicationSummary
-	json.NewDecoder(w.Body).Decode(&summaries)
+	if err := json.NewDecoder(w.Body).Decode(&summaries); err != nil {
+		t.Fatal(err)
+	}
 	if len(summaries) != 1 {
 		t.Fatalf("applications: got %d, want 1", len(summaries))
 	}
@@ -188,7 +198,9 @@ func TestListReleases(t *testing.T) {
 	}
 
 	var releases []model.ReleaseVersion
-	json.NewDecoder(w.Body).Decode(&releases)
+	if err := json.NewDecoder(w.Body).Decode(&releases); err != nil {
+		t.Fatal(err)
+	}
 	if len(releases) != 1 {
 		t.Fatalf("releases: got %d, want 1", len(releases))
 	}
@@ -231,7 +243,9 @@ func TestGetReleaseSnapshot(t *testing.T) {
 	}
 
 	var snap model.SnapshotRecord
-	json.NewDecoder(w.Body).Decode(&snap)
+	if err := json.NewDecoder(w.Body).Decode(&snap); err != nil {
+		t.Fatal(err)
+	}
 	if snap.Name != "quay-v3-16-snap-1" {
 		t.Errorf("snapshot name: got %q, want quay-v3-16-snap-1", snap.Name)
 	}
@@ -387,7 +401,9 @@ func TestGetReleaseReadiness(t *testing.T) {
 	}
 
 	var readiness model.ReadinessResponse
-	json.NewDecoder(w.Body).Decode(&readiness)
+	if err := json.NewDecoder(w.Body).Decode(&readiness); err != nil {
+		t.Fatal(err)
+	}
 	if readiness.Signal != "green" {
 		t.Errorf("signal: got %q, want green", readiness.Signal)
 	}
