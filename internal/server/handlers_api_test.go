@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -24,7 +25,7 @@ func setupTestServer(t *testing.T) *Server {
 		database.Close()
 		os.Remove(dbPath)
 	})
-	return New(database, nil, ":0", "https://issues.redhat.com")
+	return New(database, nil, ":0", "https://issues.redhat.com", slog.Default())
 }
 
 func TestHealthEndpoint(t *testing.T) {

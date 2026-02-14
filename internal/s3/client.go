@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -30,10 +30,11 @@ type Config struct {
 type Client struct {
 	s3     *s3.Client
 	bucket string
+	logger *slog.Logger
 }
 
 // New creates an S3 Client from the given Config.
-func New(ctx context.Context, cfg Config) (*Client, error) {
+func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Client, error) {
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx,
 		awsconfig.WithRegion(cfg.Region),
 		awsconfig.WithCredentialsProvider(
@@ -55,6 +56,7 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	return &Client{
 		s3:     s3.NewFromConfig(awsCfg, opts...),
 		bucket: cfg.Bucket,
+		logger: logger,
 	}, nil
 }
 
@@ -134,12 +136,12 @@ func (c *Client) GetTestResults(ctx context.Context, junitPath string) (*junit.R
 			}
 			data, err := c.getObject(ctx, *obj.Key)
 			if err != nil {
-				log.Printf("warning: skipping junit file %s: %v", *obj.Key, err)
+				c.logger.Warn("skipping junit file", "key", *obj.Key, "error", err)
 				continue
 			}
 			r, err := junit.Parse(data)
 			if err != nil {
-				log.Printf("warning: skipping junit file %s: %v", *obj.Key, err)
+				c.logger.Warn("skipping junit file", "key", *obj.Key, "error", err)
 				continue
 			}
 			results = append(results, r)

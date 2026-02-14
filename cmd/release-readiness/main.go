@@ -4,7 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -65,12 +65,16 @@ func cmdServe(args []string) {
 
 	fs.Parse(args)
 
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	slog.SetDefault(logger)
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	database, err := db.Open(*dbPath)
 	if err != nil {
-		log.Fatalf("open database: %v", err)
+		logger.Error("open database", "error", err)
+		os.Exit(1)
 	}
 	defer database.Close()
 
@@ -78,21 +82,23 @@ func cmdServe(args []string) {
 
 	var s3c *s3client.Client
 	if *s3Bucket != "" {
+		s3Log := logger.With("component", "s3-sync")
 		s3c, err = s3client.New(ctx, s3client.Config{
 			Endpoint:  *s3Endpoint,
 			Region:    *s3Region,
 			Bucket:    *s3Bucket,
 			AccessKey: *s3AccessKey,
 			SecretKey: *s3SecretKey,
-		})
+		}, s3Log)
 		if err != nil {
-			log.Fatalf("create s3 client: %v", err)
+			logger.Error("create s3 client", "error", err)
+			os.Exit(1)
 		}
-		log.Printf("s3 sync enabled: bucket=%s endpoint=%s interval=%s", *s3Bucket, *s3Endpoint, *s3PollInterval)
+		logger.Info("s3 sync enabled", "bucket", *s3Bucket, "endpoint", *s3Endpoint, "interval", *s3PollInterval)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runS3SyncLoop(ctx, database, s3c, *s3PollInterval)
+			runS3SyncLoop(ctx, database, s3c, *s3PollInterval, s3Log)
 		}()
 	}
 
@@ -104,21 +110,23 @@ func cmdServe(args []string) {
 			Project:            *jiraProject,
 			TargetVersionField: *jiraTargetVersionField,
 		})
-		log.Printf("jira sync enabled: url=%s project=%s interval=%s", *jiraURL, *jiraProject, *jiraPollInterval)
+		jiraLog := logger.With("component", "jira-sync")
+		logger.Info("jira sync enabled", "url", *jiraURL, "project", *jiraProject, "interval", *jiraPollInterval)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runJiraSyncLoop(ctx, database, jiraClient, *jiraPollInterval)
+			runJiraSyncLoop(ctx, database, jiraClient, *jiraPollInterval, jiraLog)
 		}()
 	}
 
-	srv := server.New(database, s3c, *addr, *jiraURL)
+	srv := server.New(database, s3c, *addr, *jiraURL, logger)
 	if err := srv.Run(ctx); err != nil {
-		log.Fatalf("server: %v", err)
+		logger.Error("server", "error", err)
+		os.Exit(1)
 	}
 
 	wg.Wait()
-	log.Println("all background tasks stopped")
+	logger.Info("all background tasks stopped")
 }
 
 func envOrDefault(key, fallback string) string {
@@ -130,55 +138,55 @@ func envOrDefault(key, fallback string) string {
 
 // --- S3 Sync ---
 
-func runS3SyncLoop(ctx context.Context, database *db.DB, s3c *s3client.Client, interval time.Duration) {
-	syncS3Once(ctx, database, s3c)
+func runS3SyncLoop(ctx context.Context, database *db.DB, s3c *s3client.Client, interval time.Duration, logger *slog.Logger) {
+	syncS3Once(ctx, database, s3c, logger)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("s3-sync: stopping")
+			logger.Info("stopping")
 			return
 		case <-ticker.C:
-			syncS3Once(ctx, database, s3c)
+			syncS3Once(ctx, database, s3c, logger)
 		}
 	}
 }
 
-func syncS3Once(ctx context.Context, database *db.DB, s3c *s3client.Client) {
+func syncS3Once(ctx context.Context, database *db.DB, s3c *s3client.Client, logger *slog.Logger) {
 	apps, err := s3c.ListApplications(ctx)
 	if err != nil {
-		log.Printf("s3-sync: list applications: %v", err)
+		logger.Error("list applications", "error", err)
 		return
 	}
 
 	for _, app := range apps {
 		keys, err := s3c.ListSnapshots(ctx, app)
 		if err != nil {
-			log.Printf("s3-sync: list snapshots for %s: %v", app, err)
+			logger.Error("list snapshots", "application", app, "error", err)
 			continue
 		}
 
 		for _, key := range keys {
 			snap, err := s3c.GetSnapshot(ctx, key)
 			if err != nil {
-				log.Printf("s3-sync: get snapshot %s: %v", key, err)
+				logger.Error("get snapshot", "key", key, "error", err)
 				continue
 			}
 
 			exists, err := database.SnapshotExistsByName(snap.Snapshot)
 			if err != nil {
-				log.Printf("s3-sync: check snapshot %s: %v", snap.Snapshot, err)
+				logger.Error("check snapshot", "snapshot", snap.Snapshot, "error", err)
 				continue
 			}
 			if exists {
 				continue
 			}
 
-			log.Printf("s3-sync: new snapshot %s for %s", snap.Snapshot, app)
+			logger.Info("new snapshot", "snapshot", snap.Snapshot, "application", app)
 
 			if err := ingestSnapshot(database, snap); err != nil {
-				log.Printf("s3-sync: ingest snapshot %s: %v", snap.Snapshot, err)
+				logger.Error("ingest snapshot", "snapshot", snap.Snapshot, "error", err)
 			}
 		}
 	}
@@ -238,30 +246,30 @@ func ingestSnapshot(database *db.DB, snap *model.Snapshot) error {
 
 // --- JIRA Sync ---
 
-func runJiraSyncLoop(ctx context.Context, database *db.DB, jiraClient *jira.Client, interval time.Duration) {
-	syncJiraOnce(ctx, database, jiraClient)
+func runJiraSyncLoop(ctx context.Context, database *db.DB, jiraClient *jira.Client, interval time.Duration, logger *slog.Logger) {
+	syncJiraOnce(ctx, database, jiraClient, logger)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("jira-sync: stopping")
+			logger.Info("stopping")
 			return
 		case <-ticker.C:
-			syncJiraOnce(ctx, database, jiraClient)
+			syncJiraOnce(ctx, database, jiraClient, logger)
 		}
 	}
 }
 
-func syncJiraOnce(ctx context.Context, database *db.DB, jiraClient *jira.Client) {
+func syncJiraOnce(ctx context.Context, database *db.DB, jiraClient *jira.Client, logger *slog.Logger) {
 	// Discover active releases from JIRA using the -area/release component
 	releases, err := jiraClient.DiscoverActiveReleases(ctx)
 	if err != nil {
-		log.Printf("jira-sync: discover releases: %v", err)
+		logger.Error("discover releases", "error", err)
 		return
 	}
 
-	log.Printf("jira-sync: discovered %d active releases", len(releases))
+	logger.Info("discovered active releases", "count", len(releases))
 
 	// Track which versions were actively synced this cycle
 	activeSet := make(map[string]bool, len(releases))
@@ -282,7 +290,7 @@ func syncJiraOnce(ctx context.Context, database *db.DB, jiraClient *jira.Client)
 		// Try to get version metadata from JIRA (release date, description, etc.)
 		versionInfo, err := jiraClient.GetVersion(ctx, rel.FixVersion)
 		if err != nil {
-			log.Printf("jira-sync: get version %s: %v (continuing without version metadata)", rel.FixVersion, err)
+			logger.Warn("get version metadata", "version", rel.FixVersion, "error", err)
 		} else {
 			rv.Description = versionInfo.Description
 			rv.Released = versionInfo.Released
@@ -296,11 +304,11 @@ func syncJiraOnce(ctx context.Context, database *db.DB, jiraClient *jira.Client)
 		}
 
 		if err := database.UpsertReleaseVersion(rv); err != nil {
-			log.Printf("jira-sync: upsert version %s: %v", rel.FixVersion, err)
+			logger.Error("upsert version", "version", rel.FixVersion, "error", err)
 		}
 
 		// Sync issues for this fixVersion
-		syncJiraVersion(ctx, database, jiraClient, rel.FixVersion)
+		syncJiraVersion(ctx, database, jiraClient, rel.FixVersion, logger)
 	}
 
 	// Reconcile unreleased versions in DB that may have been released in
@@ -308,7 +316,7 @@ func syncJiraOnce(ctx context.Context, database *db.DB, jiraClient *jira.Client)
 	// DiscoverActiveReleases).
 	dbVersions, err := database.ListActiveReleaseVersions()
 	if err != nil {
-		log.Printf("jira-sync: list active db versions: %v", err)
+		logger.Error("list active db versions", "error", err)
 	} else {
 		for _, dbv := range dbVersions {
 			if activeSet[dbv.Name] {
@@ -328,17 +336,17 @@ func syncJiraOnce(ctx context.Context, database *db.DB, jiraClient *jira.Client)
 					}
 				}
 				database.UpsertReleaseVersion(&dbv)
-				syncJiraVersion(ctx, database, jiraClient, dbv.Name)
-				log.Printf("jira-sync: reconciled version %s (released=%v)", dbv.Name, versionInfo.Released)
+				syncJiraVersion(ctx, database, jiraClient, dbv.Name, logger)
+				logger.Info("reconciled version", "version", dbv.Name, "released", versionInfo.Released)
 			}
 		}
 	}
 }
 
-func syncJiraVersion(ctx context.Context, database *db.DB, jiraClient *jira.Client, fixVersion string) {
+func syncJiraVersion(ctx context.Context, database *db.DB, jiraClient *jira.Client, fixVersion string, logger *slog.Logger) {
 	issues, err := jiraClient.SearchIssues(ctx, fixVersion)
 	if err != nil {
-		log.Printf("jira-sync: search issues for %s: %v", fixVersion, err)
+		logger.Error("search issues", "version", fixVersion, "error", err)
 		return
 	}
 
@@ -381,14 +389,14 @@ func syncJiraVersion(ctx context.Context, database *db.DB, jiraClient *jira.Clie
 		}
 
 		if err := database.UpsertJiraIssue(record); err != nil {
-			log.Printf("jira-sync: upsert issue %s: %v", issue.Key, err)
+			logger.Error("upsert issue", "key", issue.Key, "error", err)
 		}
 	}
 
 	// Remove issues no longer in this fixVersion
 	if err := database.DeleteJiraIssuesNotIn(fixVersion, keys); err != nil {
-		log.Printf("jira-sync: cleanup issues for %s: %v", fixVersion, err)
+		logger.Error("cleanup issues", "version", fixVersion, "error", err)
 	}
 
-	log.Printf("jira-sync: synced %d issues for fixVersion %s", len(issues), fixVersion)
+	logger.Info("synced issues", "count", len(issues), "version", fixVersion)
 }

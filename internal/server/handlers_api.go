@@ -3,7 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -293,7 +293,7 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	}
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		log.Printf("json encode: %v", err)
+		slog.Error("json encode", "error", err)
 	}
 }
 

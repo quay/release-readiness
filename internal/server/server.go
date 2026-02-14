@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -12,20 +12,21 @@ import (
 )
 
 type Server struct {
-	db         *db.DB
-	s3         *s3client.Client
-	http       *http.Server
+	db          *db.DB
+	s3          *s3client.Client
+	http        *http.Server
+	logger      *slog.Logger
 	jiraBaseURL string
 }
 
-func New(database *db.DB, s3c *s3client.Client, addr, jiraBaseURL string) *Server {
-	s := &Server{db: database, s3: s3c, jiraBaseURL: jiraBaseURL}
+func New(database *db.DB, s3c *s3client.Client, addr, jiraBaseURL string, logger *slog.Logger) *Server {
+	s := &Server{db: database, s3: s3c, logger: logger, jiraBaseURL: jiraBaseURL}
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
 
 	var handler http.Handler = mux
-	handler = loggingMiddleware(handler)
-	handler = recoveryMiddleware(handler)
+	handler = loggingMiddleware(logger, handler)
+	handler = recoveryMiddleware(logger, handler)
 
 	s.http = &http.Server{
 		Addr:         addr,
@@ -40,14 +41,14 @@ func New(database *db.DB, s3c *s3client.Client, addr, jiraBaseURL string) *Serve
 
 func (s *Server) Run(ctx context.Context) error {
 	go func() {
-		log.Printf("listening on %s", s.http.Addr)
+		s.logger.Info("listening", "addr", s.http.Addr)
 		if err := s.http.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("server error: %v", err)
+			s.logger.Error("server error", "error", err)
 		}
 	}()
 
 	<-ctx.Done()
-	log.Println("shutting down...")
+	s.logger.Info("shutting down")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
