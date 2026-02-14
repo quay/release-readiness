@@ -46,11 +46,11 @@ func cmdServe(args []string) {
 	dbPath := fs.String("db", "dashboard.db", "SQLite database path")
 
 	// S3 flags
-	s3Endpoint := fs.String("s3-endpoint", "", "S3 endpoint URL (e.g. http://localhost:3900)")
-	s3Region := fs.String("s3-region", "us-east-1", "S3 region")
-	s3Bucket := fs.String("s3-bucket", "", "S3 bucket name")
-	s3AccessKey := fs.String("s3-access-key", "", "S3 access key")
-	s3SecretKey := fs.String("s3-secret-key", "", "S3 secret key")
+	s3Endpoint := fs.String("s3-endpoint", os.Getenv("S3_ENDPOINT"), "S3 endpoint URL (e.g. http://localhost:3900)")
+	s3Region := fs.String("s3-region", envOrDefault("S3_REGION", "us-east-1"), "S3 region")
+	s3Bucket := fs.String("s3-bucket", os.Getenv("S3_BUCKET"), "S3 bucket name")
+	s3AccessKey := fs.String("s3-access-key", os.Getenv("AWS_ACCESS_KEY_ID"), "S3 access key")
+	s3SecretKey := fs.String("s3-secret-key", os.Getenv("AWS_SECRET_ACCESS_KEY"), "S3 secret key")
 	s3PollInterval := fs.Duration("s3-poll-interval", 30*time.Second, "S3 sync poll interval")
 
 	// JIRA flags
