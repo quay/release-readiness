@@ -3,7 +3,15 @@ name: sqlc
 on:
   push:
     branches: [main]
+    paths:
+      - 'internal/db/queries/**'
+      - 'internal/db/schema.sql'
+      - 'sqlc.yaml'
   pull_request:
+    paths:
+      - 'internal/db/queries/**'
+      - 'internal/db/schema.sql'
+      - 'sqlc.yaml'
 
 jobs:
   check:
