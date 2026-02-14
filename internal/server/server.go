@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/quay/release-readiness/internal/db"
@@ -41,15 +38,11 @@ func New(database *db.DB, s3c *s3client.Client, addr, jiraBaseURL string) *Serve
 	return s
 }
 
-func (s *Server) Run() error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
+func (s *Server) Run(ctx context.Context) error {
 	go func() {
 		log.Printf("listening on %s", s.http.Addr)
 		if err := s.http.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("server error: %v", err)
-			stop()
 		}
 	}()
 

@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/quay/release-readiness/internal/db"
@@ -62,15 +65,19 @@ func cmdServe(args []string) {
 
 	fs.Parse(args)
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	database, err := db.Open(*dbPath)
 	if err != nil {
 		log.Fatalf("open database: %v", err)
 	}
 	defer database.Close()
 
+	var wg sync.WaitGroup
+
 	var s3c *s3client.Client
 	if *s3Bucket != "" {
-		ctx := context.Background()
 		s3c, err = s3client.New(ctx, s3client.Config{
 			Endpoint:  *s3Endpoint,
 			Region:    *s3Region,
@@ -82,7 +89,11 @@ func cmdServe(args []string) {
 			log.Fatalf("create s3 client: %v", err)
 		}
 		log.Printf("s3 sync enabled: bucket=%s endpoint=%s interval=%s", *s3Bucket, *s3Endpoint, *s3PollInterval)
-		go runS3SyncLoop(database, s3c, *s3PollInterval)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runS3SyncLoop(ctx, database, s3c, *s3PollInterval)
+		}()
 	}
 
 	// Start JIRA sync if token is configured
@@ -94,13 +105,20 @@ func cmdServe(args []string) {
 			TargetVersionField: *jiraTargetVersionField,
 		})
 		log.Printf("jira sync enabled: url=%s project=%s interval=%s", *jiraURL, *jiraProject, *jiraPollInterval)
-		go runJiraSyncLoop(database, jiraClient, *jiraPollInterval)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runJiraSyncLoop(ctx, database, jiraClient, *jiraPollInterval)
+		}()
 	}
 
 	srv := server.New(database, s3c, *addr, *jiraURL)
-	if err := srv.Run(); err != nil {
+	if err := srv.Run(ctx); err != nil {
 		log.Fatalf("server: %v", err)
 	}
+
+	wg.Wait()
+	log.Println("all background tasks stopped")
 }
 
 func envOrDefault(key, fallback string) string {
@@ -112,18 +130,22 @@ func envOrDefault(key, fallback string) string {
 
 // --- S3 Sync ---
 
-func runS3SyncLoop(database *db.DB, s3c *s3client.Client, interval time.Duration) {
-	syncS3Once(database, s3c)
+func runS3SyncLoop(ctx context.Context, database *db.DB, s3c *s3client.Client, interval time.Duration) {
+	syncS3Once(ctx, database, s3c)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	for range ticker.C {
-		syncS3Once(database, s3c)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("s3-sync: stopping")
+			return
+		case <-ticker.C:
+			syncS3Once(ctx, database, s3c)
+		}
 	}
 }
 
-func syncS3Once(database *db.DB, s3c *s3client.Client) {
-	ctx := context.Background()
-
+func syncS3Once(ctx context.Context, database *db.DB, s3c *s3client.Client) {
 	apps, err := s3c.ListApplications(ctx)
 	if err != nil {
 		log.Printf("s3-sync: list applications: %v", err)
@@ -216,18 +238,22 @@ func ingestSnapshot(database *db.DB, snap *model.Snapshot) error {
 
 // --- JIRA Sync ---
 
-func runJiraSyncLoop(database *db.DB, jiraClient *jira.Client, interval time.Duration) {
-	syncJiraOnce(database, jiraClient)
+func runJiraSyncLoop(ctx context.Context, database *db.DB, jiraClient *jira.Client, interval time.Duration) {
+	syncJiraOnce(ctx, database, jiraClient)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	for range ticker.C {
-		syncJiraOnce(database, jiraClient)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("jira-sync: stopping")
+			return
+		case <-ticker.C:
+			syncJiraOnce(ctx, database, jiraClient)
+		}
 	}
 }
 
-func syncJiraOnce(database *db.DB, jiraClient *jira.Client) {
-	ctx := context.Background()
-
+func syncJiraOnce(ctx context.Context, database *db.DB, jiraClient *jira.Client) {
 	// Discover active releases from JIRA using the -area/release component
 	releases, err := jiraClient.DiscoverActiveReleases(ctx)
 	if err != nil {
