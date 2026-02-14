@@ -1,29 +1,28 @@
 package db
 
 import (
+	"context"
 	"time"
 
+	"github.com/quay/release-readiness/internal/db/sqlc"
 	"github.com/quay/release-readiness/internal/model"
 )
 
-func (d *DB) CreateSnapshot(application, name, triggerComponent, triggerGitSHA, triggerPipelineRun string, testsPassed, released bool, releaseBlockedReason string, createdAt time.Time) (*model.SnapshotRecord, error) {
-	tp, rel := 0, 0
-	if testsPassed {
-		tp = 1
-	}
-	if released {
-		rel = 1
-	}
-
-	res, err := d.Exec(`
-		INSERT INTO snapshots (application, name, trigger_component, trigger_git_sha, trigger_pipeline_run, tests_passed, released, release_blocked_reason, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		application, name, triggerComponent, triggerGitSHA, triggerPipelineRun, tp, rel, releaseBlockedReason, createdAt.UTC().Format(time.RFC3339))
+func (d *DB) CreateSnapshot(ctx context.Context, application, name, triggerComponent, triggerGitSHA, triggerPipelineRun string, testsPassed, released bool, releaseBlockedReason string, createdAt time.Time) (*model.SnapshotRecord, error) {
+	id, err := d.queries().CreateSnapshot(ctx, dbsqlc.CreateSnapshotParams{
+		Application:          application,
+		Name:                 name,
+		TriggerComponent:     triggerComponent,
+		TriggerGitSha:        triggerGitSHA,
+		TriggerPipelineRun:   triggerPipelineRun,
+		TestsPassed:          boolToInt64(testsPassed),
+		Released:             boolToInt64(released),
+		ReleaseBlockedReason: releaseBlockedReason,
+		CreatedAt:            createdAt.UTC().Format(time.RFC3339),
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	id, _ := res.LastInsertId()
 	return &model.SnapshotRecord{
 		ID:                   id,
 		Application:          application,
@@ -38,39 +37,28 @@ func (d *DB) CreateSnapshot(application, name, triggerComponent, triggerGitSHA, 
 	}, nil
 }
 
-func (d *DB) SnapshotExistsByName(name string) (bool, error) {
-	var count int
-	err := d.QueryRow(`SELECT COUNT(*) FROM snapshots WHERE name = ?`, name).Scan(&count)
+func (d *DB) SnapshotExistsByName(ctx context.Context, name string) (bool, error) {
+	count, err := d.queries().SnapshotExistsByName(ctx, name)
 	if err != nil {
 		return false, err
 	}
 	return count > 0, nil
 }
 
-func (d *DB) GetSnapshotByName(name string) (*model.SnapshotRecord, error) {
-	var s model.SnapshotRecord
-	var ts string
-	var tp, rel int
-	err := d.QueryRow(`
-		SELECT id, application, name, trigger_component, trigger_git_sha, trigger_pipeline_run,
-		       tests_passed, released, release_blocked_reason, created_at
-		FROM snapshots WHERE name = ?`, name).
-		Scan(&s.ID, &s.Application, &s.Name, &s.TriggerComponent, &s.TriggerGitSHA,
-			&s.TriggerPipelineRun, &tp, &rel, &s.ReleaseBlockedReason, &ts)
+func (d *DB) GetSnapshotByName(ctx context.Context, name string) (*model.SnapshotRecord, error) {
+	row, err := d.queries().GetSnapshotRow(ctx, name)
 	if err != nil {
 		return nil, err
 	}
-	s.TestsPassed = tp == 1
-	s.Released = rel == 1
-	s.CreatedAt, _ = time.Parse(time.RFC3339, ts)
+	s := toSnapshotRecord(row)
 
-	components, err := d.listSnapshotComponents(s.ID)
+	components, err := d.listSnapshotComponents(ctx, s.ID)
 	if err != nil {
 		return nil, err
 	}
 	s.Components = components
 
-	results, err := d.ListSnapshotTestResults(s.ID)
+	results, err := d.ListSnapshotTestResults(ctx, s.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -79,138 +67,137 @@ func (d *DB) GetSnapshotByName(name string) (*model.SnapshotRecord, error) {
 	return &s, nil
 }
 
-func (d *DB) CreateSnapshotComponent(snapshotID int64, component, gitSHA, imageURL, gitURL string) error {
-	_, err := d.Exec(`
-		INSERT INTO snapshot_components (snapshot_id, component, git_sha, image_url, git_url)
-		VALUES (?, ?, ?, ?, ?)`,
-		snapshotID, component, gitSHA, imageURL, gitURL)
-	return err
+func (d *DB) CreateSnapshotComponent(ctx context.Context, snapshotID int64, component, gitSHA, imageURL, gitURL string) error {
+	return d.queries().CreateSnapshotComponent(ctx, dbsqlc.CreateSnapshotComponentParams{
+		SnapshotID: snapshotID,
+		Component:  component,
+		GitSha:     gitSHA,
+		ImageUrl:   imageURL,
+		GitUrl:     gitURL,
+	})
 }
 
-func (d *DB) listSnapshotComponents(snapshotID int64) ([]model.ComponentRecord, error) {
-	rows, err := d.Query(`
-		SELECT id, snapshot_id, component, git_sha, image_url, git_url
-		FROM snapshot_components
-		WHERE snapshot_id = ?
-		ORDER BY component`, snapshotID)
+func (d *DB) listSnapshotComponents(ctx context.Context, snapshotID int64) ([]model.ComponentRecord, error) {
+	rows, err := d.queries().ListSnapshotComponents(ctx, snapshotID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var components []model.ComponentRecord
-	for rows.Next() {
-		var c model.ComponentRecord
-		if err := rows.Scan(&c.ID, &c.SnapshotID, &c.Component, &c.GitSHA, &c.ImageURL, &c.GitURL); err != nil {
-			return nil, err
+	components := make([]model.ComponentRecord, len(rows))
+	for i, r := range rows {
+		components[i] = model.ComponentRecord{
+			ID:         r.ID,
+			SnapshotID: r.SnapshotID,
+			Component:  r.Component,
+			GitSHA:     r.GitSha,
+			ImageURL:   r.ImageUrl,
+			GitURL:     r.GitUrl,
 		}
-		components = append(components, c)
 	}
-	return components, rows.Err()
+	return components, nil
 }
 
-func (d *DB) ListSnapshots(application string, limit, offset int) ([]model.SnapshotRecord, error) {
-	query := `SELECT id, application, name, trigger_component, trigger_git_sha, trigger_pipeline_run,
-	                 tests_passed, released, release_blocked_reason, created_at
-	          FROM snapshots`
-	var args []interface{}
+func (d *DB) ListSnapshots(ctx context.Context, application string, limit, offset int) ([]model.SnapshotRecord, error) {
+	var rows []dbsqlc.Snapshot
+	var err error
 	if application != "" {
-		query += ` WHERE application = ?`
-		args = append(args, application)
-	}
-	query += ` ORDER BY id DESC LIMIT ? OFFSET ?`
-	args = append(args, limit, offset)
-
-	rows, err := d.Query(query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var snapshots []model.SnapshotRecord
-	for rows.Next() {
-		var s model.SnapshotRecord
-		var ts string
-		var tp, rel int
-		if err := rows.Scan(&s.ID, &s.Application, &s.Name, &s.TriggerComponent, &s.TriggerGitSHA,
-			&s.TriggerPipelineRun, &tp, &rel, &s.ReleaseBlockedReason, &ts); err != nil {
-			return nil, err
-		}
-		s.TestsPassed = tp == 1
-		s.Released = rel == 1
-		s.CreatedAt, _ = time.Parse(time.RFC3339, ts)
-		snapshots = append(snapshots, s)
-	}
-	return snapshots, rows.Err()
-}
-
-func (d *DB) LatestSnapshotPerApplication() ([]model.ApplicationSummary, error) {
-	rows, err := d.Query(`
-		SELECT s.id, s.application, s.name, s.trigger_component, s.trigger_git_sha, s.trigger_pipeline_run,
-		       s.tests_passed, s.released, s.release_blocked_reason, s.created_at, counts.cnt
-		FROM snapshots s
-		JOIN (
-			SELECT application, MAX(id) AS max_id, COUNT(*) AS cnt
-			FROM snapshots
-			GROUP BY application
-		) counts ON s.id = counts.max_id
-		ORDER BY s.application`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var summaries []model.ApplicationSummary
-	for rows.Next() {
-		var s model.SnapshotRecord
-		var ts string
-		var tp, rel int
-		var count int
-		if err := rows.Scan(&s.ID, &s.Application, &s.Name, &s.TriggerComponent, &s.TriggerGitSHA,
-			&s.TriggerPipelineRun, &tp, &rel, &s.ReleaseBlockedReason, &ts, &count); err != nil {
-			return nil, err
-		}
-		s.TestsPassed = tp == 1
-		s.Released = rel == 1
-		s.CreatedAt, _ = time.Parse(time.RFC3339, ts)
-		summaries = append(summaries, model.ApplicationSummary{
-			Application:    s.Application,
-			LatestSnapshot: &s,
-			SnapshotCount:  count,
+		rows, err = d.queries().ListSnapshotsByApplication(ctx, dbsqlc.ListSnapshotsByApplicationParams{
+			Application: application,
+			Limit:       int64(limit),
+			Offset:      int64(offset),
+		})
+	} else {
+		rows, err = d.queries().ListAllSnapshots(ctx, dbsqlc.ListAllSnapshotsParams{
+			Limit:  int64(limit),
+			Offset: int64(offset),
 		})
 	}
-	return summaries, rows.Err()
-}
-
-func (d *DB) CreateSnapshotTestResult(snapshotID int64, scenario, status, pipelineRun string, total, passed, failed, skipped int, durationSec float64) error {
-	_, err := d.Exec(`
-		INSERT INTO snapshot_test_results (snapshot_id, scenario, status, pipeline_run, total, passed, failed, skipped, duration_sec)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		snapshotID, scenario, status, pipelineRun, total, passed, failed, skipped, durationSec)
-	return err
-}
-
-func (d *DB) ListSnapshotTestResults(snapshotID int64) ([]model.SnapshotTestResult, error) {
-	rows, err := d.Query(`
-		SELECT id, snapshot_id, scenario, status, pipeline_run, total, passed, failed, skipped, duration_sec, created_at
-		FROM snapshot_test_results
-		WHERE snapshot_id = ?
-		ORDER BY scenario`, snapshotID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var results []model.SnapshotTestResult
-	for rows.Next() {
-		var r model.SnapshotTestResult
-		var ts string
-		if err := rows.Scan(&r.ID, &r.SnapshotID, &r.Scenario, &r.Status, &r.PipelineRun,
-			&r.Total, &r.Passed, &r.Failed, &r.Skipped, &r.DurationSec, &ts); err != nil {
-			return nil, err
-		}
-		r.CreatedAt, _ = time.Parse(time.RFC3339, ts)
-		results = append(results, r)
+	snapshots := make([]model.SnapshotRecord, len(rows))
+	for i, r := range rows {
+		snapshots[i] = toSnapshotRecord(r)
 	}
-	return results, rows.Err()
+	return snapshots, nil
+}
+
+func (d *DB) LatestSnapshotPerApplication(ctx context.Context) ([]model.ApplicationSummary, error) {
+	rows, err := d.queries().LatestSnapshotPerApplication(ctx)
+	if err != nil {
+		return nil, err
+	}
+	summaries := make([]model.ApplicationSummary, len(rows))
+	for i, r := range rows {
+		s := model.SnapshotRecord{
+			ID:                   r.ID,
+			Application:          r.Application,
+			Name:                 r.Name,
+			TriggerComponent:     r.TriggerComponent,
+			TriggerGitSHA:        r.TriggerGitSha,
+			TriggerPipelineRun:   r.TriggerPipelineRun,
+			TestsPassed:          r.TestsPassed == 1,
+			Released:             r.Released == 1,
+			ReleaseBlockedReason: r.ReleaseBlockedReason,
+			CreatedAt:            parseTime(r.CreatedAt),
+		}
+		summaries[i] = model.ApplicationSummary{
+			Application:    r.Application,
+			LatestSnapshot: &s,
+			SnapshotCount:  int(r.Cnt),
+		}
+	}
+	return summaries, nil
+}
+
+func (d *DB) CreateSnapshotTestResult(ctx context.Context, snapshotID int64, scenario, status, pipelineRun string, total, passed, failed, skipped int, durationSec float64) error {
+	return d.queries().CreateSnapshotTestResult(ctx, dbsqlc.CreateSnapshotTestResultParams{
+		SnapshotID:  snapshotID,
+		Scenario:    scenario,
+		Status:      status,
+		PipelineRun: pipelineRun,
+		Total:       int64(total),
+		Passed:      int64(passed),
+		Failed:      int64(failed),
+		Skipped:     int64(skipped),
+		DurationSec: durationSec,
+	})
+}
+
+func (d *DB) ListSnapshotTestResults(ctx context.Context, snapshotID int64) ([]model.SnapshotTestResult, error) {
+	rows, err := d.queries().ListSnapshotTestResults(ctx, snapshotID)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]model.SnapshotTestResult, len(rows))
+	for i, r := range rows {
+		results[i] = model.SnapshotTestResult{
+			ID:          r.ID,
+			SnapshotID:  r.SnapshotID,
+			Scenario:    r.Scenario,
+			Status:      r.Status,
+			PipelineRun: r.PipelineRun,
+			Total:       int(r.Total),
+			Passed:      int(r.Passed),
+			Failed:      int(r.Failed),
+			Skipped:     int(r.Skipped),
+			DurationSec: r.DurationSec,
+			CreatedAt:   parseTime(r.CreatedAt),
+		}
+	}
+	return results, nil
+}
+
+func toSnapshotRecord(r dbsqlc.Snapshot) model.SnapshotRecord {
+	return model.SnapshotRecord{
+		ID:                   r.ID,
+		Application:          r.Application,
+		Name:                 r.Name,
+		TriggerComponent:     r.TriggerComponent,
+		TriggerGitSHA:        r.TriggerGitSha,
+		TriggerPipelineRun:   r.TriggerPipelineRun,
+		TestsPassed:          r.TestsPassed == 1,
+		Released:             r.Released == 1,
+		ReleaseBlockedReason: r.ReleaseBlockedReason,
+		CreatedAt:            parseTime(r.CreatedAt),
+	}
 }
