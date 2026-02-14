@@ -24,6 +24,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/applications", s.handleListApplications)
 
 	// Releases API (version-centric)
+	mux.HandleFunc("GET /api/v1/releases/overview", s.handleReleasesOverview)
 	mux.HandleFunc("GET /api/v1/releases", s.handleListReleases)
 	mux.HandleFunc("GET /api/v1/releases/{version}", s.handleGetRelease)
 	mux.HandleFunc("GET /api/v1/releases/{version}/snapshot", s.handleGetReleaseSnapshot)

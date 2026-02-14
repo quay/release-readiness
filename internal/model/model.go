@@ -78,6 +78,21 @@ type IssueSummary struct {
 	Bugs     int `json:"bugs"`
 }
 
+// ReleaseOverview is a combined view of a release with its issue summary,
+// readiness signal, and latest snapshot metadata.
+type ReleaseOverview struct {
+	Release      ReleaseVersion    `json:"release"`
+	IssueSummary *IssueSummary     `json:"issue_summary,omitempty"`
+	Readiness    ReadinessResponse `json:"readiness"`
+	Snapshot     *SnapshotRecord   `json:"snapshot,omitempty"`
+}
+
+// ReadinessResponse represents the computed readiness signal for a release.
+type ReadinessResponse struct {
+	Signal  string `json:"signal"`  // "green", "yellow", "red"
+	Message string `json:"message"` // human-readable reason
+}
+
 // ReleaseVersion represents a JIRA fixVersion with release metadata.
 type ReleaseVersion struct {
 	Name                   string     `json:"name"`

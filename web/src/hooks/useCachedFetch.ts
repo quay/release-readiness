@@ -9,6 +9,11 @@ const cache = new Map<string, CacheEntry<unknown>>();
 
 const DEFAULT_TTL_MS = 60_000;
 
+/** Seed an entry into the shared cache so subsequent useCachedFetch calls can reuse it. */
+export function seedCache<T>(key: string, data: T): void {
+  cache.set(key, { data, timestamp: Date.now() });
+}
+
 export function useCachedFetch<T>(
   key: string | null,
   fetcher: () => Promise<T>,

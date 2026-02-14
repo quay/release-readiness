@@ -88,6 +88,48 @@ func (d *DB) GetIssueSummary(fixVersion string) (*model.IssueSummary, error) {
 	return &s, nil
 }
 
+// GetIssueSummariesBatch returns aggregate counts for multiple fixVersions in a single query.
+func (d *DB) GetIssueSummariesBatch(fixVersions []string) (map[string]*model.IssueSummary, error) {
+	if len(fixVersions) == 0 {
+		return map[string]*model.IssueSummary{}, nil
+	}
+
+	placeholders := make([]string, len(fixVersions))
+	args := make([]interface{}, len(fixVersions))
+	for i, v := range fixVersions {
+		placeholders[i] = "?"
+		args[i] = v
+	}
+
+	query := `
+		SELECT fix_version,
+			COUNT(*) AS total,
+			SUM(CASE WHEN LOWER(status) IN ('closed', 'verified', 'done') THEN 1 ELSE 0 END) AS verified,
+			SUM(CASE WHEN LOWER(status) NOT IN ('closed', 'verified', 'done') THEN 1 ELSE 0 END) AS open,
+			SUM(CASE WHEN LOWER(issue_type) = 'cve' OR LOWER(labels) LIKE '%cve%' THEN 1 ELSE 0 END) AS cves,
+			SUM(CASE WHEN LOWER(issue_type) = 'bug' THEN 1 ELSE 0 END) AS bugs
+		FROM jira_issues
+		WHERE fix_version IN (` + strings.Join(placeholders, ",") + `)
+		GROUP BY fix_version`
+
+	rows, err := d.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string]*model.IssueSummary, len(fixVersions))
+	for rows.Next() {
+		var fixVersion string
+		var s model.IssueSummary
+		if err := rows.Scan(&fixVersion, &s.Total, &s.Verified, &s.Open, &s.CVEs, &s.Bugs); err != nil {
+			return nil, err
+		}
+		result[fixVersion] = &s
+	}
+	return result, rows.Err()
+}
+
 // UpsertReleaseVersion inserts or updates a release version by name.
 func (d *DB) UpsertReleaseVersion(v *model.ReleaseVersion) error {
 	relDate := ""

@@ -81,6 +81,13 @@ export interface ReadinessResponse {
   message: string;
 }
 
+export interface ReleaseOverview {
+  release: ReleaseVersion;
+  issue_summary?: IssueSummary;
+  readiness: ReadinessResponse;
+  snapshot?: SnapshotRecord;
+}
+
 export interface DashboardConfig {
   jira_base_url: string;
 }
