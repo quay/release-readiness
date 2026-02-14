@@ -15,27 +15,14 @@ import (
 )
 
 type Server struct {
-	db          *db.DB
-	s3          *s3client.Client
-	http        *http.Server
-	fixVersions map[string]string // app prefix → JIRA fixVersion overrides
+	db         *db.DB
+	s3         *s3client.Client
+	http       *http.Server
+	jiraBaseURL string
 }
 
-// Option configures the server.
-type Option func(*Server)
-
-// WithFixVersions sets explicit app→fixVersion mappings.
-func WithFixVersions(m map[string]string) Option {
-	return func(s *Server) {
-		s.fixVersions = m
-	}
-}
-
-func New(database *db.DB, s3c *s3client.Client, addr string, opts ...Option) *Server {
-	s := &Server{db: database, s3: s3c}
-	for _, o := range opts {
-		o(s)
-	}
+func New(database *db.DB, s3c *s3client.Client, addr, jiraBaseURL string) *Server {
+	s := &Server{db: database, s3: s3c, jiraBaseURL: jiraBaseURL}
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
 

@@ -9,8 +9,9 @@ import (
 )
 
 func (s *Server) registerRoutes(mux *http.ServeMux) {
-	// Health
+	// Health & Config
 	mux.HandleFunc("GET /api/v1/health", s.handleHealth)
+	mux.HandleFunc("GET /api/v1/config", s.handleConfig)
 
 	// Components API
 	mux.HandleFunc("GET /api/v1/components", s.handleListComponents)
@@ -22,10 +23,13 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Applications API
 	mux.HandleFunc("GET /api/v1/applications", s.handleListApplications)
 
-	// JIRA / Release API
-	mux.HandleFunc("GET /api/v1/releases/{app}/issues", s.handleListIssues)
-	mux.HandleFunc("GET /api/v1/releases/{app}/issues/summary", s.handleGetIssueSummary)
-	mux.HandleFunc("GET /api/v1/releases/{app}/version", s.handleGetReleaseVersion)
+	// Releases API (version-centric)
+	mux.HandleFunc("GET /api/v1/releases", s.handleListReleases)
+	mux.HandleFunc("GET /api/v1/releases/{version}", s.handleGetRelease)
+	mux.HandleFunc("GET /api/v1/releases/{version}/snapshot", s.handleGetReleaseSnapshot)
+	mux.HandleFunc("GET /api/v1/releases/{version}/issues", s.handleListReleaseIssues)
+	mux.HandleFunc("GET /api/v1/releases/{version}/issues/summary", s.handleGetReleaseIssueSummary)
+	mux.HandleFunc("GET /api/v1/releases/{version}/readiness", s.handleGetReleaseReadiness)
 
 	// SPA — serve React app from embedded dist/
 	distSub, _ := fs.Sub(web.DistFS, "dist")

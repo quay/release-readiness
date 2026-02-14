@@ -6,7 +6,7 @@ import (
 	"github.com/quay/build-dashboard/internal/model"
 )
 
-func (d *DB) CreateSnapshot(application, name, triggerComponent, triggerGitSHA, triggerPipelineRun string, testsPassed, released bool, releaseBlockedReason string) (*model.SnapshotRecord, error) {
+func (d *DB) CreateSnapshot(application, name, triggerComponent, triggerGitSHA, triggerPipelineRun string, testsPassed, released bool, releaseBlockedReason string, createdAt time.Time) (*model.SnapshotRecord, error) {
 	tp, rel := 0, 0
 	if testsPassed {
 		tp = 1
@@ -16,9 +16,9 @@ func (d *DB) CreateSnapshot(application, name, triggerComponent, triggerGitSHA, 
 	}
 
 	res, err := d.Exec(`
-		INSERT INTO snapshots (application, name, trigger_component, trigger_git_sha, trigger_pipeline_run, tests_passed, released, release_blocked_reason)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		application, name, triggerComponent, triggerGitSHA, triggerPipelineRun, tp, rel, releaseBlockedReason)
+		INSERT INTO snapshots (application, name, trigger_component, trigger_git_sha, trigger_pipeline_run, tests_passed, released, release_blocked_reason, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		application, name, triggerComponent, triggerGitSHA, triggerPipelineRun, tp, rel, releaseBlockedReason, createdAt.UTC().Format(time.RFC3339))
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +34,7 @@ func (d *DB) CreateSnapshot(application, name, triggerComponent, triggerGitSHA, 
 		TestsPassed:          testsPassed,
 		Released:             released,
 		ReleaseBlockedReason: releaseBlockedReason,
-		CreatedAt:            time.Now().UTC(),
+		CreatedAt:            createdAt.UTC(),
 	}, nil
 }
 
@@ -79,17 +79,17 @@ func (d *DB) GetSnapshotByName(name string) (*model.SnapshotRecord, error) {
 	return &s, nil
 }
 
-func (d *DB) CreateSnapshotComponent(snapshotID int64, component, gitSHA, imageURL string) error {
+func (d *DB) CreateSnapshotComponent(snapshotID int64, component, gitSHA, imageURL, gitURL string) error {
 	_, err := d.Exec(`
-		INSERT INTO snapshot_components (snapshot_id, component, git_sha, image_url)
-		VALUES (?, ?, ?, ?)`,
-		snapshotID, component, gitSHA, imageURL)
+		INSERT INTO snapshot_components (snapshot_id, component, git_sha, image_url, git_url)
+		VALUES (?, ?, ?, ?, ?)`,
+		snapshotID, component, gitSHA, imageURL, gitURL)
 	return err
 }
 
 func (d *DB) listSnapshotComponents(snapshotID int64) ([]model.ComponentRecord, error) {
 	rows, err := d.Query(`
-		SELECT id, snapshot_id, component, git_sha, image_url
+		SELECT id, snapshot_id, component, git_sha, image_url, git_url
 		FROM snapshot_components
 		WHERE snapshot_id = ?
 		ORDER BY component`, snapshotID)
@@ -101,7 +101,7 @@ func (d *DB) listSnapshotComponents(snapshotID int64) ([]model.ComponentRecord, 
 	var components []model.ComponentRecord
 	for rows.Next() {
 		var c model.ComponentRecord
-		if err := rows.Scan(&c.ID, &c.SnapshotID, &c.Component, &c.GitSHA, &c.ImageURL); err != nil {
+		if err := rows.Scan(&c.ID, &c.SnapshotID, &c.Component, &c.GitSHA, &c.ImageURL, &c.GitURL); err != nil {
 			return nil, err
 		}
 		components = append(components, c)

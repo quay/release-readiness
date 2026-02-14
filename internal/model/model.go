@@ -15,6 +15,7 @@ type ComponentRecord struct {
 	Component  string `json:"component"`
 	GitSHA     string `json:"git_sha"`
 	ImageURL   string `json:"image_url"`
+	GitURL     string `json:"git_url"`
 }
 
 type SnapshotRecord struct {
@@ -79,9 +80,13 @@ type IssueSummary struct {
 
 // ReleaseVersion represents a JIRA fixVersion with release metadata.
 type ReleaseVersion struct {
-	Name        string     `json:"name"`
-	Description string     `json:"description"`
-	ReleaseDate *time.Time `json:"release_date,omitempty"`
-	Released    bool       `json:"released"`
-	Archived    bool       `json:"archived"`
+	Name                   string     `json:"name"`
+	Description            string     `json:"description"`
+	ReleaseDate            *time.Time `json:"release_date,omitempty"`
+	Released               bool       `json:"released"`
+	Archived               bool       `json:"archived"`
+	ReleaseTicketKey       string     `json:"release_ticket_key,omitempty"`
+	ReleaseTicketAssignee  string     `json:"release_ticket_assignee,omitempty"`
+	S3Application          string     `json:"s3_application,omitempty"`
+	DueDate                *time.Time `json:"due_date,omitempty"`
 }

@@ -57,8 +57,8 @@ func cmdServe(args []string) {
 	jiraURL := fs.String("jira-url", envOrDefault("JIRA_URL", "https://issues.redhat.com"), "JIRA server URL")
 	jiraToken := fs.String("jira-token", os.Getenv("JIRA_TOKEN"), "JIRA personal access token")
 	jiraProject := fs.String("jira-project", envOrDefault("JIRA_PROJECT", "PROJQUAY"), "JIRA project key")
+	jiraTargetVersionField := fs.String("jira-target-version-field", envOrDefault("JIRA_TARGET_VERSION_FIELD", "customfield_12319940"), "JIRA custom field name for Target Version")
 	jiraPollInterval := fs.Duration("jira-poll-interval", 5*time.Minute, "JIRA sync poll interval")
-	jiraFixVersions := fs.String("jira-fix-versions", os.Getenv("JIRA_FIX_VERSIONS"), "app=version mappings (e.g. quay-v3-16=3.16.2,quay-v3-17=3.17.0)")
 
 	fs.Parse(args)
 
@@ -67,9 +67,6 @@ func cmdServe(args []string) {
 		log.Fatalf("open database: %v", err)
 	}
 	defer database.Close()
-
-	// Parse fix version overrides
-	fixVersionMap := parseFixVersions(*jiraFixVersions)
 
 	var s3c *s3client.Client
 	if *s3Bucket != "" {
@@ -91,15 +88,16 @@ func cmdServe(args []string) {
 	// Start JIRA sync if token is configured
 	if *jiraToken != "" {
 		jiraClient := jira.New(jira.Config{
-			BaseURL: *jiraURL,
-			Token:   *jiraToken,
-			Project: *jiraProject,
+			BaseURL:            *jiraURL,
+			Token:              *jiraToken,
+			Project:            *jiraProject,
+			TargetVersionField: *jiraTargetVersionField,
 		})
 		log.Printf("jira sync enabled: url=%s project=%s interval=%s", *jiraURL, *jiraProject, *jiraPollInterval)
-		go runJiraSyncLoop(database, jiraClient, fixVersionMap, *jiraPollInterval)
+		go runJiraSyncLoop(database, jiraClient, *jiraPollInterval)
 	}
 
-	srv := server.New(database, s3c, *addr, server.WithFixVersions(fixVersionMap))
+	srv := server.New(database, s3c, *addr, *jiraURL)
 	if err := srv.Run(); err != nil {
 		log.Fatalf("server: %v", err)
 	}
@@ -110,21 +108,6 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-// parseFixVersions parses "app1=ver1,app2=ver2" into a map.
-func parseFixVersions(s string) map[string]string {
-	m := make(map[string]string)
-	if s == "" {
-		return m
-	}
-	for _, pair := range strings.Split(s, ",") {
-		parts := strings.SplitN(pair, "=", 2)
-		if len(parts) == 2 {
-			m[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
-		}
-	}
-	return m
 }
 
 // --- S3 Sync ---
@@ -148,25 +131,33 @@ func syncS3Once(database *db.DB, s3c *s3client.Client) {
 	}
 
 	for _, app := range apps {
-		snap, err := s3c.GetLatestSnapshot(ctx, app)
+		keys, err := s3c.ListSnapshots(ctx, app)
 		if err != nil {
-			log.Printf("s3-sync: get latest snapshot for %s: %v", app, err)
+			log.Printf("s3-sync: list snapshots for %s: %v", app, err)
 			continue
 		}
 
-		exists, err := database.SnapshotExistsByName(snap.Snapshot)
-		if err != nil {
-			log.Printf("s3-sync: check snapshot %s: %v", snap.Snapshot, err)
-			continue
-		}
-		if exists {
-			continue
-		}
+		for _, key := range keys {
+			snap, err := s3c.GetSnapshot(ctx, key)
+			if err != nil {
+				log.Printf("s3-sync: get snapshot %s: %v", key, err)
+				continue
+			}
 
-		log.Printf("s3-sync: new snapshot %s for %s", snap.Snapshot, app)
+			exists, err := database.SnapshotExistsByName(snap.Snapshot)
+			if err != nil {
+				log.Printf("s3-sync: check snapshot %s: %v", snap.Snapshot, err)
+				continue
+			}
+			if exists {
+				continue
+			}
 
-		if err := ingestSnapshot(database, snap); err != nil {
-			log.Printf("s3-sync: ingest snapshot %s: %v", snap.Snapshot, err)
+			log.Printf("s3-sync: new snapshot %s for %s", snap.Snapshot, app)
+
+			if err := ingestSnapshot(database, snap); err != nil {
+				log.Printf("s3-sync: ingest snapshot %s: %v", snap.Snapshot, err)
+			}
 		}
 	}
 }
@@ -181,6 +172,7 @@ func ingestSnapshot(database *db.DB, snap *model.Snapshot) error {
 		snap.Readiness.TestsPassed,
 		snap.Readiness.Released,
 		snap.Readiness.ReleaseBlockedReason,
+		snap.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("create snapshot: %w", err)
@@ -191,7 +183,7 @@ func ingestSnapshot(database *db.DB, snap *model.Snapshot) error {
 			return fmt.Errorf("ensure component %s: %w", comp.Name, err)
 		}
 
-		if err := database.CreateSnapshotComponent(snapshotRecord.ID, comp.Name, comp.GitRevision, comp.ContainerImage); err != nil {
+		if err := database.CreateSnapshotComponent(snapshotRecord.ID, comp.Name, comp.GitRevision, comp.ContainerImage, comp.GitURL); err != nil {
 			return fmt.Errorf("create snapshot component %s: %w", comp.Name, err)
 		}
 	}
@@ -224,49 +216,100 @@ func ingestSnapshot(database *db.DB, snap *model.Snapshot) error {
 
 // --- JIRA Sync ---
 
-func runJiraSyncLoop(database *db.DB, jiraClient *jira.Client, fixVersionMap map[string]string, interval time.Duration) {
-	syncJiraOnce(database, jiraClient, fixVersionMap)
+func runJiraSyncLoop(database *db.DB, jiraClient *jira.Client, interval time.Duration) {
+	syncJiraOnce(database, jiraClient)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for range ticker.C {
-		syncJiraOnce(database, jiraClient, fixVersionMap)
+		syncJiraOnce(database, jiraClient)
 	}
 }
 
-func syncJiraOnce(database *db.DB, jiraClient *jira.Client, fixVersionMap map[string]string) {
+func syncJiraOnce(database *db.DB, jiraClient *jira.Client) {
 	ctx := context.Background()
 
-	// Collect unique fix versions to sync
-	versions := make(map[string]bool)
-
-	// From explicit mappings
-	for _, v := range fixVersionMap {
-		versions[v] = true
-	}
-
-	// From known applications (derive fix versions)
-	apps, err := database.LatestSnapshotPerApplication()
+	// Discover active releases from JIRA using the -area/release component
+	releases, err := jiraClient.DiscoverActiveReleases(ctx)
 	if err != nil {
-		log.Printf("jira-sync: list applications: %v", err)
+		log.Printf("jira-sync: discover releases: %v", err)
 		return
 	}
-	for _, app := range apps {
-		v := fixVersionMap[app.Application]
-		if v == "" {
-			v = deriveFixVersion(app.Application)
+
+	log.Printf("jira-sync: discovered %d active releases", len(releases))
+
+	// Track which versions were actively synced this cycle
+	activeSet := make(map[string]bool, len(releases))
+
+	// Process each discovered release sequentially to avoid rate limiting
+	for _, rel := range releases {
+		activeSet[rel.FixVersion] = true
+
+		// Store the discovered release version
+		rv := &model.ReleaseVersion{
+			Name:                  rel.FixVersion,
+			ReleaseTicketKey:      rel.ReleaseTicketKey,
+			ReleaseTicketAssignee: rel.Assignee,
+			S3Application:        rel.S3Application,
+			DueDate:              rel.DueDate,
 		}
-		if v != "" {
-			versions[v] = true
+
+		// Try to get version metadata from JIRA (release date, description, etc.)
+		versionInfo, err := jiraClient.GetVersion(ctx, rel.FixVersion)
+		if err != nil {
+			log.Printf("jira-sync: get version %s: %v (continuing without version metadata)", rel.FixVersion, err)
+		} else {
+			rv.Description = versionInfo.Description
+			rv.Released = versionInfo.Released
+			rv.Archived = versionInfo.Archived
+			if versionInfo.ReleaseDate != "" {
+				t, err := time.Parse("2006-01-02", versionInfo.ReleaseDate)
+				if err == nil {
+					rv.ReleaseDate = &t
+				}
+			}
 		}
+
+		if err := database.UpsertReleaseVersion(rv); err != nil {
+			log.Printf("jira-sync: upsert version %s: %v", rel.FixVersion, err)
+		}
+
+		// Sync issues for this fixVersion
+		syncJiraVersion(ctx, database, jiraClient, rel.FixVersion)
 	}
 
-	for version := range versions {
-		syncJiraVersion(ctx, database, jiraClient, version)
+	// Reconcile unreleased versions in DB that may have been released in
+	// JIRA after their tracking ticket was closed (and thus dropped from
+	// DiscoverActiveReleases).
+	dbVersions, err := database.ListActiveReleaseVersions()
+	if err != nil {
+		log.Printf("jira-sync: list active db versions: %v", err)
+	} else {
+		for _, dbv := range dbVersions {
+			if activeSet[dbv.Name] {
+				continue // already synced this cycle
+			}
+			versionInfo, err := jiraClient.GetVersion(ctx, dbv.Name)
+			if err != nil {
+				continue // version may not exist in JIRA
+			}
+			if versionInfo.Released || versionInfo.Archived {
+				dbv.Released = versionInfo.Released
+				dbv.Archived = versionInfo.Archived
+				if versionInfo.ReleaseDate != "" {
+					t, err := time.Parse("2006-01-02", versionInfo.ReleaseDate)
+					if err == nil {
+						dbv.ReleaseDate = &t
+					}
+				}
+				database.UpsertReleaseVersion(&dbv)
+				syncJiraVersion(ctx, database, jiraClient, dbv.Name)
+				log.Printf("jira-sync: reconciled version %s (released=%v)", dbv.Name, versionInfo.Released)
+			}
+		}
 	}
 }
 
 func syncJiraVersion(ctx context.Context, database *db.DB, jiraClient *jira.Client, fixVersion string) {
-	// Sync issues
 	issues, err := jiraClient.SearchIssues(ctx, fixVersion)
 	if err != nil {
 		log.Printf("jira-sync: search issues for %s: %v", fixVersion, err)
@@ -321,66 +364,5 @@ func syncJiraVersion(ctx context.Context, database *db.DB, jiraClient *jira.Clie
 		log.Printf("jira-sync: cleanup issues for %s: %v", fixVersion, err)
 	}
 
-	// Sync version metadata
-	versionInfo, err := jiraClient.GetVersion(ctx, fixVersion)
-	if err != nil {
-		log.Printf("jira-sync: get version %s: %v", fixVersion, err)
-		return
-	}
-
-	var releaseDate *time.Time
-	if versionInfo.ReleaseDate != "" {
-		t, err := time.Parse("2006-01-02", versionInfo.ReleaseDate)
-		if err == nil {
-			releaseDate = &t
-		}
-	}
-
-	rv := &model.ReleaseVersion{
-		Name:        versionInfo.Name,
-		Description: versionInfo.Description,
-		ReleaseDate: releaseDate,
-		Released:    versionInfo.Released,
-		Archived:    versionInfo.Archived,
-	}
-	if err := database.UpsertReleaseVersion(rv); err != nil {
-		log.Printf("jira-sync: upsert version %s: %v", fixVersion, err)
-	}
-
 	log.Printf("jira-sync: synced %d issues for fixVersion %s", len(issues), fixVersion)
-}
-
-// deriveFixVersion extracts a version string from an application prefix.
-// Examples: "quay-v3-16" → "3.16", "quay-v3-16-2" → "3.16.2"
-func deriveFixVersion(app string) string {
-	parts := strings.Split(app, "-")
-	var versionParts []string
-	inVersion := false
-	for _, p := range parts {
-		if !inVersion {
-			if len(p) > 0 && p[0] == 'v' {
-				inVersion = true
-				versionParts = append(versionParts, p[1:])
-			}
-			continue
-		}
-		if isNumeric(p) {
-			versionParts = append(versionParts, p)
-		} else {
-			break
-		}
-	}
-	if len(versionParts) == 0 {
-		return ""
-	}
-	return strings.Join(versionParts, ".")
-}
-
-func isNumeric(s string) bool {
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return len(s) > 0
 }

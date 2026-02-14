@@ -1,0 +1,9 @@
+.pf-v6-c-card {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+:root.pf-v6-theme-dark {
+  --pf-v6-chart-donut--label--title--Fill: #e0e0e0;
+  --pf-v6-chart-donut--label--subtitle--Fill: #a3a3a3;
+  --pf-v6-chart-global--label--Fill: #d2d2d2;
+}

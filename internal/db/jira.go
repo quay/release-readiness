@@ -12,12 +12,11 @@ func (d *DB) UpsertJiraIssue(issue *model.JiraIssueRecord) error {
 	_, err := d.Exec(`
 		INSERT INTO jira_issues (key, summary, status, priority, labels, fix_version, assignee, issue_type, resolution, link, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(key) DO UPDATE SET
+		ON CONFLICT(key, fix_version) DO UPDATE SET
 			summary=excluded.summary,
 			status=excluded.status,
 			priority=excluded.priority,
 			labels=excluded.labels,
-			fix_version=excluded.fix_version,
 			assignee=excluded.assignee,
 			issue_type=excluded.issue_type,
 			resolution=excluded.resolution,
@@ -95,6 +94,10 @@ func (d *DB) UpsertReleaseVersion(v *model.ReleaseVersion) error {
 	if v.ReleaseDate != nil {
 		relDate = v.ReleaseDate.UTC().Format(time.RFC3339)
 	}
+	dueDate := ""
+	if v.DueDate != nil {
+		dueDate = v.DueDate.UTC().Format(time.RFC3339)
+	}
 	rel, arch := 0, 0
 	if v.Released {
 		rel = 1
@@ -103,26 +106,30 @@ func (d *DB) UpsertReleaseVersion(v *model.ReleaseVersion) error {
 		arch = 1
 	}
 	_, err := d.Exec(`
-		INSERT INTO release_versions (name, description, release_date, released, archived)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO release_versions (name, description, release_date, released, archived, release_ticket_key, release_ticket_assignee, s3_application, due_date)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(name) DO UPDATE SET
 			description=excluded.description,
 			release_date=excluded.release_date,
 			released=excluded.released,
-			archived=excluded.archived`,
-		v.Name, v.Description, relDate, rel, arch)
+			archived=excluded.archived,
+			release_ticket_key=excluded.release_ticket_key,
+			release_ticket_assignee=excluded.release_ticket_assignee,
+			s3_application=excluded.s3_application,
+			due_date=excluded.due_date`,
+		v.Name, v.Description, relDate, rel, arch, v.ReleaseTicketKey, v.ReleaseTicketAssignee, v.S3Application, dueDate)
 	return err
 }
 
 // GetReleaseVersion returns a release version by name.
 func (d *DB) GetReleaseVersion(name string) (*model.ReleaseVersion, error) {
 	var v model.ReleaseVersion
-	var relDate string
+	var relDate, dueDate string
 	var rel, arch int
 	err := d.QueryRow(`
-		SELECT name, description, release_date, released, archived
+		SELECT name, description, release_date, released, archived, release_ticket_key, release_ticket_assignee, s3_application, due_date
 		FROM release_versions WHERE name = ?`, name).
-		Scan(&v.Name, &v.Description, &relDate, &rel, &arch)
+		Scan(&v.Name, &v.Description, &relDate, &rel, &arch, &v.ReleaseTicketKey, &v.ReleaseTicketAssignee, &v.S3Application, &dueDate)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +141,90 @@ func (d *DB) GetReleaseVersion(name string) (*model.ReleaseVersion, error) {
 			v.ReleaseDate = &t
 		}
 	}
+	if dueDate != "" {
+		t, err := time.Parse(time.RFC3339, dueDate)
+		if err == nil {
+			v.DueDate = &t
+		}
+	}
 	return &v, nil
+}
+
+// ListActiveReleaseVersions returns all release versions that are not released or archived.
+func (d *DB) ListActiveReleaseVersions() ([]model.ReleaseVersion, error) {
+	rows, err := d.Query(`
+		SELECT name, description, release_date, released, archived, release_ticket_key, release_ticket_assignee, s3_application, due_date
+		FROM release_versions
+		WHERE released = 0 AND archived = 0
+		ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var versions []model.ReleaseVersion
+	for rows.Next() {
+		var v model.ReleaseVersion
+		var relDate, dueDate string
+		var rel, arch int
+		if err := rows.Scan(&v.Name, &v.Description, &relDate, &rel, &arch, &v.ReleaseTicketKey, &v.ReleaseTicketAssignee, &v.S3Application, &dueDate); err != nil {
+			return nil, err
+		}
+		v.Released = rel == 1
+		v.Archived = arch == 1
+		if relDate != "" {
+			t, err := time.Parse(time.RFC3339, relDate)
+			if err == nil {
+				v.ReleaseDate = &t
+			}
+		}
+		if dueDate != "" {
+			t, err := time.Parse(time.RFC3339, dueDate)
+			if err == nil {
+				v.DueDate = &t
+			}
+		}
+		versions = append(versions, v)
+	}
+	return versions, rows.Err()
+}
+
+// ListAllReleaseVersions returns all release versions.
+func (d *DB) ListAllReleaseVersions() ([]model.ReleaseVersion, error) {
+	rows, err := d.Query(`
+		SELECT name, description, release_date, released, archived, release_ticket_key, release_ticket_assignee, s3_application, due_date
+		FROM release_versions
+		ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var versions []model.ReleaseVersion
+	for rows.Next() {
+		var v model.ReleaseVersion
+		var relDate, dueDate string
+		var rel, arch int
+		if err := rows.Scan(&v.Name, &v.Description, &relDate, &rel, &arch, &v.ReleaseTicketKey, &v.ReleaseTicketAssignee, &v.S3Application, &dueDate); err != nil {
+			return nil, err
+		}
+		v.Released = rel == 1
+		v.Archived = arch == 1
+		if relDate != "" {
+			t, err := time.Parse(time.RFC3339, relDate)
+			if err == nil {
+				v.ReleaseDate = &t
+			}
+		}
+		if dueDate != "" {
+			t, err := time.Parse(time.RFC3339, dueDate)
+			if err == nil {
+				v.DueDate = &t
+			}
+		}
+		versions = append(versions, v)
+	}
+	return versions, rows.Err()
 }
 
 // DeleteJiraIssuesNotIn removes issues for a fixVersion that are not in the given keys slice.

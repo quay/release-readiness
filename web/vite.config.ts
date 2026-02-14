@@ -8,9 +8,10 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    allowedHosts: ["workstation"],
     proxy: {
       "/api": {
-        target: "http://localhost:8080",
+        target: "http://localhost:8088",
         changeOrigin: true,
       },
     },

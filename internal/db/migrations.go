@@ -47,14 +47,15 @@ CREATE TABLE IF NOT EXISTS snapshot_components (
     snapshot_id INTEGER NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
     component   TEXT NOT NULL,
     git_sha     TEXT NOT NULL DEFAULT '',
-    image_url   TEXT NOT NULL DEFAULT ''
+    image_url   TEXT NOT NULL DEFAULT '',
+    git_url     TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_snapshot_components_snapshot ON snapshot_components(snapshot_id);
 
 CREATE TABLE IF NOT EXISTS jira_issues (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    key         TEXT NOT NULL UNIQUE,
+    key         TEXT NOT NULL,
     summary     TEXT NOT NULL DEFAULT '',
     status      TEXT NOT NULL DEFAULT '',
     priority    TEXT NOT NULL DEFAULT '',
@@ -67,15 +68,20 @@ CREATE TABLE IF NOT EXISTS jira_issues (
     updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jira_issues_key_version ON jira_issues(key, fix_version);
 CREATE INDEX IF NOT EXISTS idx_jira_issues_fix_version ON jira_issues(fix_version);
 
 CREATE TABLE IF NOT EXISTS release_versions (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    name         TEXT NOT NULL UNIQUE,
-    description  TEXT NOT NULL DEFAULT '',
-    release_date TEXT NOT NULL DEFAULT '',
-    released     INTEGER NOT NULL DEFAULT 0,
-    archived     INTEGER NOT NULL DEFAULT 0
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    name               TEXT NOT NULL UNIQUE,
+    description        TEXT NOT NULL DEFAULT '',
+    release_date       TEXT NOT NULL DEFAULT '',
+    released           INTEGER NOT NULL DEFAULT 0,
+    archived           INTEGER NOT NULL DEFAULT 0,
+    release_ticket_key      TEXT NOT NULL DEFAULT '',
+    release_ticket_assignee TEXT NOT NULL DEFAULT '',
+    s3_application          TEXT NOT NULL DEFAULT '',
+    due_date                TEXT NOT NULL DEFAULT ''
 );
 `
 

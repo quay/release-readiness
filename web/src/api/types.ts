@@ -4,6 +4,7 @@ export interface ComponentRecord {
   component: string;
   git_sha: string;
   image_url: string;
+  git_url: string;
 }
 
 export interface SnapshotTestResult {
@@ -46,7 +47,7 @@ export interface JiraIssue {
   summary: string;
   status: string;
   priority: string;
-  labels: string[];
+  labels: string;
   fix_version: string;
   assignee: string;
   issue_type: string;
@@ -69,4 +70,17 @@ export interface ReleaseVersion {
   release_date?: string;
   released: boolean;
   archived: boolean;
+  release_ticket_key?: string;
+  release_ticket_assignee?: string;
+  s3_application?: string;
+  due_date?: string;
+}
+
+export interface ReadinessResponse {
+  signal: "green" | "yellow" | "red";
+  message: string;
+}
+
+export interface DashboardConfig {
+  jira_base_url: string;
 }
