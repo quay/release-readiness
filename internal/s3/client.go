@@ -174,6 +174,6 @@ func (c *Client) getObject(ctx context.Context, key string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get %s: %w", key, err)
 	}
-	defer out.Body.Close()
+	defer func() { _ = out.Body.Close() }()
 	return io.ReadAll(out.Body)
 }

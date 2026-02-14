@@ -55,17 +55,17 @@ type Issue struct {
 
 // IssueFields holds the fields we care about from a JIRA issue.
 type IssueFields struct {
-	Summary    string        `json:"summary"`
-	Status     StatusField   `json:"status"`
-	Priority   PriorityField `json:"priority"`
-	Labels     []string      `json:"labels"`
-	FixVersions []VersionField `json:"fixVersions"`
-	Assignee   *UserField    `json:"assignee"`
-	IssueType  TypeField     `json:"issuetype"`
-	Resolution *ResField     `json:"resolution"`
-	Updated    string        `json:"updated"`
-	DueDate    string        `json:"duedate"`
-	Components []ComponentField `json:"components"`
+	Summary     string           `json:"summary"`
+	Status      StatusField      `json:"status"`
+	Priority    PriorityField    `json:"priority"`
+	Labels      []string         `json:"labels"`
+	FixVersions []VersionField   `json:"fixVersions"`
+	Assignee    *UserField       `json:"assignee"`
+	IssueType   TypeField        `json:"issuetype"`
+	Resolution  *ResField        `json:"resolution"`
+	Updated     string           `json:"updated"`
+	DueDate     string           `json:"duedate"`
+	Components  []ComponentField `json:"components"`
 }
 
 type StatusField struct {
@@ -354,7 +354,7 @@ func (c *Client) doGet(ctx context.Context, reqURL string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

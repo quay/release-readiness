@@ -50,7 +50,7 @@ func (d *DB) ListJiraIssues(ctx context.Context, fixVersion string, issueType, s
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var issues []model.JiraIssueRecord
 	for rows.Next() {
@@ -110,7 +110,7 @@ func (d *DB) GetIssueSummariesBatch(ctx context.Context, fixVersions []string) (
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	result := make(map[string]*model.IssueSummary, len(fixVersions))
 	for rows.Next() {

@@ -63,7 +63,7 @@ func cmdServe(args []string) {
 	jiraTargetVersionField := fs.String("jira-target-version-field", envOrDefault("JIRA_TARGET_VERSION_FIELD", "customfield_12319940"), "JIRA custom field name for Target Version")
 	jiraPollInterval := fs.Duration("jira-poll-interval", 5*time.Minute, "JIRA sync poll interval")
 
-	fs.Parse(args)
+	_ = fs.Parse(args)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	slog.SetDefault(logger)
@@ -76,7 +76,7 @@ func cmdServe(args []string) {
 		logger.Error("open database", "error", err)
 		os.Exit(1)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	var wg sync.WaitGroup
 
@@ -285,8 +285,8 @@ func syncJiraOnce(ctx context.Context, database *db.DB, jiraClient *jira.Client,
 			Name:                  rel.FixVersion,
 			ReleaseTicketKey:      rel.ReleaseTicketKey,
 			ReleaseTicketAssignee: rel.Assignee,
-			S3Application:        rel.S3Application,
-			DueDate:              rel.DueDate,
+			S3Application:         rel.S3Application,
+			DueDate:               rel.DueDate,
 		}
 
 		// Try to get version metadata from JIRA (release date, description, etc.)
@@ -337,7 +337,9 @@ func syncJiraOnce(ctx context.Context, database *db.DB, jiraClient *jira.Client,
 						dbv.ReleaseDate = &t
 					}
 				}
-				database.UpsertReleaseVersion(ctx, &dbv)
+				if err := database.UpsertReleaseVersion(ctx, &dbv); err != nil {
+					logger.Error("upsert version", "version", dbv.Name, "error", err)
+				}
 				syncJiraVersion(ctx, database, jiraClient, dbv.Name, logger)
 				logger.Info("reconciled version", "version", dbv.Name, "released", versionInfo.Released)
 			}

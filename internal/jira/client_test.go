@@ -13,15 +13,15 @@ func TestSearchIssues(t *testing.T) {
 		{
 			Key: "PROJQUAY-100",
 			Fields: IssueFields{
-				Summary:  "Fix auth bug",
-				Status:   StatusField{Name: "Closed"},
-				Priority: PriorityField{Name: "Major"},
-				Labels:   []string{"qe-approved"},
+				Summary:     "Fix auth bug",
+				Status:      StatusField{Name: "Closed"},
+				Priority:    PriorityField{Name: "Major"},
+				Labels:      []string{"qe-approved"},
 				FixVersions: []VersionField{{Name: "3.16.2"}},
-				Assignee: &UserField{DisplayName: "Jane Doe"},
-				IssueType: TypeField{Name: "Bug"},
-				Resolution: &ResField{Name: "Done"},
-				Updated: "2026-01-15T10:00:00.000+0000",
+				Assignee:    &UserField{DisplayName: "Jane Doe"},
+				IssueType:   TypeField{Name: "Bug"},
+				Resolution:  &ResField{Name: "Done"},
+				Updated:     "2026-01-15T10:00:00.000+0000",
 			},
 		},
 	}
@@ -45,7 +45,7 @@ func TestSearchIssues(t *testing.T) {
 			Issues:     issues,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -79,7 +79,7 @@ func TestGetVersion(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(versions)
+		_ = json.NewEncoder(w).Encode(versions)
 	}))
 	defer srv.Close()
 
@@ -136,7 +136,7 @@ func TestSearchIssuesPagination(t *testing.T) {
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -203,7 +203,7 @@ func TestDiscoverActiveReleases(t *testing.T) {
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -358,7 +358,7 @@ func TestSearchIssuesWithTargetVersion(t *testing.T) {
 			Issues:     []Issue{{Key: "PROJQUAY-10157"}},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -390,7 +390,7 @@ func TestRateLimitRetry(t *testing.T) {
 		if callCount <= 2 {
 			w.Header().Set("Retry-After", "1")
 			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte("rate limited"))
+			_, _ = w.Write([]byte("rate limited"))
 			return
 		}
 		resp := searchResponse{
@@ -400,7 +400,7 @@ func TestRateLimitRetry(t *testing.T) {
 			Issues:     []Issue{{Key: "PROJ-1"}},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 

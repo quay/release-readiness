@@ -30,14 +30,14 @@ func Open(path string) (*DB, error) {
 	}
 	for _, p := range pragmas {
 		if _, err := sqlDB.Exec(p); err != nil {
-			sqlDB.Close()
+			_ = sqlDB.Close()
 			return nil, fmt.Errorf("exec pragma %q: %w", p, err)
 		}
 	}
 
 	db := &DB{sqlDB}
 	if err := db.migrate(); err != nil {
-		sqlDB.Close()
+		_ = sqlDB.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 
