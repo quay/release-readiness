@@ -174,7 +174,7 @@ func syncS3Once(ctx context.Context, database *db.DB, s3c *s3client.Client, logg
 				continue
 			}
 
-			exists, err := database.SnapshotExistsByName(snap.Snapshot)
+			exists, err := database.SnapshotExistsByName(ctx, snap.Snapshot)
 			if err != nil {
 				logger.Error("check snapshot", "snapshot", snap.Snapshot, "error", err)
 				continue
@@ -185,15 +185,16 @@ func syncS3Once(ctx context.Context, database *db.DB, s3c *s3client.Client, logg
 
 			logger.Info("new snapshot", "snapshot", snap.Snapshot, "application", app)
 
-			if err := ingestSnapshot(database, snap); err != nil {
+			if err := ingestSnapshot(ctx, database, snap); err != nil {
 				logger.Error("ingest snapshot", "snapshot", snap.Snapshot, "error", err)
 			}
 		}
 	}
 }
 
-func ingestSnapshot(database *db.DB, snap *model.Snapshot) error {
+func ingestSnapshot(ctx context.Context, database *db.DB, snap *model.Snapshot) error {
 	snapshotRecord, err := database.CreateSnapshot(
+		ctx,
 		snap.Application,
 		snap.Snapshot,
 		snap.Trigger.Component,
@@ -209,11 +210,11 @@ func ingestSnapshot(database *db.DB, snap *model.Snapshot) error {
 	}
 
 	for _, comp := range snap.Components {
-		if _, err := database.EnsureComponent(comp.Name); err != nil {
+		if _, err := database.EnsureComponent(ctx, comp.Name); err != nil {
 			return fmt.Errorf("ensure component %s: %w", comp.Name, err)
 		}
 
-		if err := database.CreateSnapshotComponent(snapshotRecord.ID, comp.Name, comp.GitRevision, comp.ContainerImage, comp.GitURL); err != nil {
+		if err := database.CreateSnapshotComponent(ctx, snapshotRecord.ID, comp.Name, comp.GitRevision, comp.ContainerImage, comp.GitURL); err != nil {
 			return fmt.Errorf("create snapshot component %s: %w", comp.Name, err)
 		}
 	}
@@ -230,6 +231,7 @@ func ingestSnapshot(database *db.DB, snap *model.Snapshot) error {
 		}
 
 		if err := database.CreateSnapshotTestResult(
+			ctx,
 			snapshotRecord.ID,
 			tr.Scenario,
 			tr.Status,
@@ -303,7 +305,7 @@ func syncJiraOnce(ctx context.Context, database *db.DB, jiraClient *jira.Client,
 			}
 		}
 
-		if err := database.UpsertReleaseVersion(rv); err != nil {
+		if err := database.UpsertReleaseVersion(ctx, rv); err != nil {
 			logger.Error("upsert version", "version", rel.FixVersion, "error", err)
 		}
 
@@ -314,7 +316,7 @@ func syncJiraOnce(ctx context.Context, database *db.DB, jiraClient *jira.Client,
 	// Reconcile unreleased versions in DB that may have been released in
 	// JIRA after their tracking ticket was closed (and thus dropped from
 	// DiscoverActiveReleases).
-	dbVersions, err := database.ListActiveReleaseVersions()
+	dbVersions, err := database.ListActiveReleaseVersions(ctx)
 	if err != nil {
 		logger.Error("list active db versions", "error", err)
 	} else {
@@ -335,7 +337,7 @@ func syncJiraOnce(ctx context.Context, database *db.DB, jiraClient *jira.Client,
 						dbv.ReleaseDate = &t
 					}
 				}
-				database.UpsertReleaseVersion(&dbv)
+				database.UpsertReleaseVersion(ctx, &dbv)
 				syncJiraVersion(ctx, database, jiraClient, dbv.Name, logger)
 				logger.Info("reconciled version", "version", dbv.Name, "released", versionInfo.Released)
 			}
@@ -388,13 +390,13 @@ func syncJiraVersion(ctx context.Context, database *db.DB, jiraClient *jira.Clie
 			UpdatedAt:  updatedAt,
 		}
 
-		if err := database.UpsertJiraIssue(record); err != nil {
+		if err := database.UpsertJiraIssue(ctx, record); err != nil {
 			logger.Error("upsert issue", "key", issue.Key, "error", err)
 		}
 	}
 
 	// Remove issues no longer in this fixVersion
-	if err := database.DeleteJiraIssuesNotIn(fixVersion, keys); err != nil {
+	if err := database.DeleteJiraIssuesNotIn(ctx, fixVersion, keys); err != nil {
 		logger.Error("cleanup issues", "version", fixVersion, "error", err)
 	}
 

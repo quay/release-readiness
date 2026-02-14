@@ -28,7 +28,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // --- Components ---
 
 func (s *Server) handleListComponents(w http.ResponseWriter, r *http.Request) {
-	components, err := s.db.ListComponents()
+	components, err := s.db.ListComponents(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -45,7 +45,7 @@ func (s *Server) handleListSnapshots(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 {
 		limit = 50
 	}
-	snapshots, err := s.db.ListSnapshots(q.Get("application"), limit, offset)
+	snapshots, err := s.db.ListSnapshots(r.Context(), q.Get("application"), limit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -55,7 +55,7 @@ func (s *Server) handleListSnapshots(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetSnapshot(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	snap, err := s.db.GetSnapshotByName(name)
+	snap, err := s.db.GetSnapshotByName(r.Context(), name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, fmt.Errorf("snapshot not found"))
 		return
@@ -66,7 +66,7 @@ func (s *Server) handleGetSnapshot(w http.ResponseWriter, r *http.Request) {
 // --- Applications ---
 
 func (s *Server) handleListApplications(w http.ResponseWriter, r *http.Request) {
-	summaries, err := s.db.LatestSnapshotPerApplication()
+	summaries, err := s.db.LatestSnapshotPerApplication(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -77,7 +77,7 @@ func (s *Server) handleListApplications(w http.ResponseWriter, r *http.Request) 
 // --- Releases (version-centric) ---
 
 func (s *Server) handleListReleases(w http.ResponseWriter, r *http.Request) {
-	releases, err := s.db.ListAllReleaseVersions()
+	releases, err := s.db.ListAllReleaseVersions(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -90,7 +90,7 @@ func (s *Server) handleListReleases(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetRelease(w http.ResponseWriter, r *http.Request) {
 	version := r.PathValue("version")
-	release, err := s.db.GetReleaseVersion(version)
+	release, err := s.db.GetReleaseVersion(r.Context(), version)
 	if err != nil {
 		writeError(w, http.StatusNotFound, fmt.Errorf("release %q not found", version))
 		return
@@ -99,8 +99,9 @@ func (s *Server) handleGetRelease(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetReleaseSnapshot(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	version := r.PathValue("version")
-	release, err := s.db.GetReleaseVersion(version)
+	release, err := s.db.GetReleaseVersion(ctx, version)
 	if err != nil {
 		writeError(w, http.StatusNotFound, fmt.Errorf("release %q not found", version))
 		return
@@ -112,7 +113,7 @@ func (s *Server) handleGetReleaseSnapshot(w http.ResponseWriter, r *http.Request
 	}
 
 	// Get the latest snapshot for this release's S3 application
-	apps, err := s.db.LatestSnapshotPerApplication()
+	apps, err := s.db.LatestSnapshotPerApplication(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -125,7 +126,7 @@ func (s *Server) handleGetReleaseSnapshot(w http.ResponseWriter, r *http.Request
 				return
 			}
 			// Get full snapshot with components and test results
-			snap, err := s.db.GetSnapshotByName(app.LatestSnapshot.Name)
+			snap, err := s.db.GetSnapshotByName(ctx, app.LatestSnapshot.Name)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err)
 				return
@@ -141,7 +142,7 @@ func (s *Server) handleGetReleaseSnapshot(w http.ResponseWriter, r *http.Request
 func (s *Server) handleListReleaseIssues(w http.ResponseWriter, r *http.Request) {
 	version := r.PathValue("version")
 	q := r.URL.Query()
-	issues, err := s.db.ListJiraIssues(version, q.Get("type"), q.Get("status"), q.Get("label"))
+	issues, err := s.db.ListJiraIssues(r.Context(), version, q.Get("type"), q.Get("status"), q.Get("label"))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -154,7 +155,7 @@ func (s *Server) handleListReleaseIssues(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) handleGetReleaseIssueSummary(w http.ResponseWriter, r *http.Request) {
 	version := r.PathValue("version")
-	summary, err := s.db.GetIssueSummary(version)
+	summary, err := s.db.GetIssueSummary(r.Context(), version)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -163,19 +164,20 @@ func (s *Server) handleGetReleaseIssueSummary(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) handleGetReleaseReadiness(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	version := r.PathValue("version")
 
-	release, err := s.db.GetReleaseVersion(version)
+	release, err := s.db.GetReleaseVersion(ctx, version)
 	if err != nil {
 		writeError(w, http.StatusNotFound, fmt.Errorf("release %q not found", version))
 		return
 	}
 
-	issueSummary, _ := s.db.GetIssueSummary(version)
+	issueSummary, _ := s.db.GetIssueSummary(ctx, version)
 
 	testsPassed := false
 	if release.S3Application != "" {
-		apps, err := s.db.LatestSnapshotPerApplication()
+		apps, err := s.db.LatestSnapshotPerApplication(ctx)
 		if err == nil {
 			for _, app := range apps {
 				if app.Application == release.S3Application && app.LatestSnapshot != nil {
@@ -190,7 +192,8 @@ func (s *Server) handleGetReleaseReadiness(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleReleasesOverview(w http.ResponseWriter, r *http.Request) {
-	releases, err := s.db.ListAllReleaseVersions()
+	ctx := r.Context()
+	releases, err := s.db.ListAllReleaseVersions(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -199,7 +202,7 @@ func (s *Server) handleReleasesOverview(w http.ResponseWriter, r *http.Request) 
 		releases = []model.ReleaseVersion{}
 	}
 
-	apps, err := s.db.LatestSnapshotPerApplication()
+	apps, err := s.db.LatestSnapshotPerApplication(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -215,7 +218,7 @@ func (s *Server) handleReleasesOverview(w http.ResponseWriter, r *http.Request) 
 	for i, rel := range releases {
 		fixVersions[i] = rel.Name
 	}
-	issueSummaries, err := s.db.GetIssueSummariesBatch(fixVersions)
+	issueSummaries, err := s.db.GetIssueSummariesBatch(ctx, fixVersions)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

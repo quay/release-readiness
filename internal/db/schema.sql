@@ -1,0 +1,80 @@
+CREATE TABLE IF NOT EXISTS components (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+CREATE TABLE IF NOT EXISTS snapshots (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    application            TEXT NOT NULL,
+    name                   TEXT NOT NULL UNIQUE,
+    trigger_component      TEXT NOT NULL DEFAULT '',
+    trigger_git_sha        TEXT NOT NULL DEFAULT '',
+    trigger_pipeline_run   TEXT NOT NULL DEFAULT '',
+    tests_passed           INTEGER NOT NULL DEFAULT 0,
+    released               INTEGER NOT NULL DEFAULT 0,
+    release_blocked_reason TEXT NOT NULL DEFAULT '',
+    created_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_snapshots_application ON snapshots(application);
+CREATE INDEX IF NOT EXISTS idx_snapshots_created ON snapshots(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS snapshot_test_results (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id     INTEGER NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+    scenario        TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'unknown',
+    pipeline_run    TEXT NOT NULL DEFAULT '',
+    total           INTEGER NOT NULL DEFAULT 0,
+    passed          INTEGER NOT NULL DEFAULT 0,
+    failed          INTEGER NOT NULL DEFAULT 0,
+    skipped         INTEGER NOT NULL DEFAULT 0,
+    duration_sec    REAL NOT NULL DEFAULT 0.0,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_snapshot_test_results_snapshot ON snapshot_test_results(snapshot_id);
+
+CREATE TABLE IF NOT EXISTS snapshot_components (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id INTEGER NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+    component   TEXT NOT NULL,
+    git_sha     TEXT NOT NULL DEFAULT '',
+    image_url   TEXT NOT NULL DEFAULT '',
+    git_url     TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_snapshot_components_snapshot ON snapshot_components(snapshot_id);
+
+CREATE TABLE IF NOT EXISTS jira_issues (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    key         TEXT NOT NULL,
+    summary     TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT '',
+    priority    TEXT NOT NULL DEFAULT '',
+    labels      TEXT NOT NULL DEFAULT '',
+    fix_version TEXT NOT NULL DEFAULT '',
+    assignee    TEXT NOT NULL DEFAULT '',
+    issue_type  TEXT NOT NULL DEFAULT '',
+    resolution  TEXT NOT NULL DEFAULT '',
+    link        TEXT NOT NULL DEFAULT '',
+    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jira_issues_key_version ON jira_issues(key, fix_version);
+CREATE INDEX IF NOT EXISTS idx_jira_issues_fix_version ON jira_issues(fix_version);
+
+CREATE TABLE IF NOT EXISTS release_versions (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    name               TEXT NOT NULL UNIQUE,
+    description        TEXT NOT NULL DEFAULT '',
+    release_date       TEXT NOT NULL DEFAULT '',
+    released           INTEGER NOT NULL DEFAULT 0,
+    archived           INTEGER NOT NULL DEFAULT 0,
+    release_ticket_key      TEXT NOT NULL DEFAULT '',
+    release_ticket_assignee TEXT NOT NULL DEFAULT '',
+    s3_application          TEXT NOT NULL DEFAULT '',
+    due_date                TEXT NOT NULL DEFAULT ''
+);

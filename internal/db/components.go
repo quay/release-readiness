@@ -1,56 +1,57 @@
 package db
 
 import (
-	"time"
+	"context"
 
+	"github.com/quay/release-readiness/internal/db/sqlc"
 	"github.com/quay/release-readiness/internal/model"
 )
 
-func (d *DB) ListComponents() ([]model.Component, error) {
-	rows, err := d.Query(`SELECT id, name, description, created_at FROM components ORDER BY name`)
+func (d *DB) ListComponents(ctx context.Context) ([]model.Component, error) {
+	rows, err := d.queries().ListComponents(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var components []model.Component
-	for rows.Next() {
-		var c model.Component
-		var ts string
-		if err := rows.Scan(&c.ID, &c.Name, &c.Description, &ts); err != nil {
-			return nil, err
-		}
-		c.CreatedAt, _ = time.Parse(time.RFC3339, ts)
-		components = append(components, c)
+	components := make([]model.Component, len(rows))
+	for i, r := range rows {
+		components[i] = toComponent(r)
 	}
-	return components, rows.Err()
+	return components, nil
 }
 
-func (d *DB) CreateComponent(name, description string) (*model.Component, error) {
-	res, err := d.Exec(`INSERT INTO components (name, description) VALUES (?, ?)`, name, description)
+func (d *DB) CreateComponent(ctx context.Context, name, description string) (*model.Component, error) {
+	id, err := d.queries().CreateComponent(ctx, dbsqlc.CreateComponentParams{
+		Name:        name,
+		Description: description,
+	})
 	if err != nil {
 		return nil, err
 	}
-	id, _ := res.LastInsertId()
-	return &model.Component{ID: id, Name: name, Description: description, CreatedAt: time.Now().UTC()}, nil
+	return &model.Component{ID: id, Name: name, Description: description}, nil
 }
 
-func (d *DB) GetComponentByName(name string) (*model.Component, error) {
-	var c model.Component
-	var ts string
-	err := d.QueryRow(`SELECT id, name, description, created_at FROM components WHERE name = ?`, name).
-		Scan(&c.ID, &c.Name, &c.Description, &ts)
+func (d *DB) GetComponentByName(ctx context.Context, name string) (*model.Component, error) {
+	row, err := d.queries().GetComponentByName(ctx, name)
 	if err != nil {
 		return nil, err
 	}
-	c.CreatedAt, _ = time.Parse(time.RFC3339, ts)
+	c := toComponent(row)
 	return &c, nil
 }
 
-func (d *DB) EnsureComponent(name string) (*model.Component, error) {
-	comp, err := d.GetComponentByName(name)
+func (d *DB) EnsureComponent(ctx context.Context, name string) (*model.Component, error) {
+	comp, err := d.GetComponentByName(ctx, name)
 	if err == nil {
 		return comp, nil
 	}
-	return d.CreateComponent(name, "")
+	return d.CreateComponent(ctx, name, "")
+}
+
+func toComponent(r dbsqlc.Component) model.Component {
+	return model.Component{
+		ID:          r.ID,
+		Name:        r.Name,
+		Description: r.Description,
+		CreatedAt:   parseTime(r.CreatedAt),
+	}
 }

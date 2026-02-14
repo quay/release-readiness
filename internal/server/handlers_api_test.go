@@ -47,9 +47,10 @@ func TestHealthEndpoint(t *testing.T) {
 
 func TestListComponents(t *testing.T) {
 	srv := setupTestServer(t)
+	ctx := t.Context()
 
 	// Ensure a component exists
-	if _, err := srv.db.EnsureComponent("quay"); err != nil {
+	if _, err := srv.db.EnsureComponent(ctx, "quay"); err != nil {
 		t.Fatalf("ensure component: %v", err)
 	}
 
@@ -66,8 +67,9 @@ func TestListComponents(t *testing.T) {
 
 func TestListSnapshots(t *testing.T) {
 	srv := setupTestServer(t)
+	ctx := t.Context()
 
-	_, err := srv.db.CreateSnapshot("quay-v3-17", "quay-v3-17-20260213-000", "quay", "abc123", "pr-1", true, false, "", time.Now())
+	_, err := srv.db.CreateSnapshot(ctx, "quay-v3-17", "quay-v3-17-20260213-000", "quay", "abc123", "pr-1", true, false, "", time.Now())
 	if err != nil {
 		t.Fatalf("create snapshot: %v", err)
 	}
@@ -92,13 +94,14 @@ func TestListSnapshots(t *testing.T) {
 
 func TestGetSnapshot(t *testing.T) {
 	srv := setupTestServer(t)
+	ctx := t.Context()
 
-	snap, err := srv.db.CreateSnapshot("quay-v3-17", "quay-v3-17-20260213-001", "quay", "def456", "pr-2", false, false, "tests failing", time.Now())
+	snap, err := srv.db.CreateSnapshot(ctx, "quay-v3-17", "quay-v3-17-20260213-001", "quay", "def456", "pr-2", false, false, "tests failing", time.Now())
 	if err != nil {
 		t.Fatalf("create snapshot: %v", err)
 	}
 
-	if err := srv.db.CreateSnapshotTestResult(snap.ID, "operator-ginkgo", "failed", "pr-run-1", 100, 90, 10, 0, 120.5); err != nil {
+	if err := srv.db.CreateSnapshotTestResult(ctx, snap.ID, "operator-ginkgo", "failed", "pr-run-1", 100, 90, 10, 0, 120.5); err != nil {
 		t.Fatalf("create test result: %v", err)
 	}
 
@@ -128,12 +131,13 @@ func TestGetSnapshot(t *testing.T) {
 
 func TestListApplications(t *testing.T) {
 	srv := setupTestServer(t)
+	ctx := t.Context()
 
-	_, err := srv.db.CreateSnapshot("quay-v3-17", "snap-1", "quay", "abc", "pr-1", true, false, "", time.Now())
+	_, err := srv.db.CreateSnapshot(ctx, "quay-v3-17", "snap-1", "quay", "abc", "pr-1", true, false, "", time.Now())
 	if err != nil {
 		t.Fatalf("create snapshot 1: %v", err)
 	}
-	_, err = srv.db.CreateSnapshot("quay-v3-17", "snap-2", "quay", "def", "pr-2", false, false, "", time.Now())
+	_, err = srv.db.CreateSnapshot(ctx, "quay-v3-17", "snap-2", "quay", "def", "pr-2", false, false, "", time.Now())
 	if err != nil {
 		t.Fatalf("create snapshot 2: %v", err)
 	}
@@ -161,9 +165,10 @@ func TestListApplications(t *testing.T) {
 
 func TestListReleases(t *testing.T) {
 	srv := setupTestServer(t)
+	ctx := t.Context()
 
 	dueDate := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	err := srv.db.UpsertReleaseVersion(&model.ReleaseVersion{
+	err := srv.db.UpsertReleaseVersion(ctx, &model.ReleaseVersion{
 		Name:             "3.16.3",
 		Description:      "z-stream",
 		ReleaseTicketKey: "PROJQUAY-10276",
@@ -200,15 +205,16 @@ func TestListReleases(t *testing.T) {
 
 func TestGetReleaseSnapshot(t *testing.T) {
 	srv := setupTestServer(t)
+	ctx := t.Context()
 
 	// Create a snapshot for the S3 application
-	_, err := srv.db.CreateSnapshot("quay-v3-16", "quay-v3-16-snap-1", "quay", "abc123", "pr-1", true, false, "", time.Now())
+	_, err := srv.db.CreateSnapshot(ctx, "quay-v3-16", "quay-v3-16-snap-1", "quay", "abc123", "pr-1", true, false, "", time.Now())
 	if err != nil {
 		t.Fatalf("create snapshot: %v", err)
 	}
 
 	// Create the release version pointing to this S3 app
-	err = srv.db.UpsertReleaseVersion(&model.ReleaseVersion{
+	err = srv.db.UpsertReleaseVersion(ctx, &model.ReleaseVersion{
 		Name:          "3.16.3",
 		S3Application: "quay-v3-16",
 	})
@@ -233,9 +239,10 @@ func TestGetReleaseSnapshot(t *testing.T) {
 
 func TestReleasesOverview(t *testing.T) {
 	srv := setupTestServer(t)
+	ctx := t.Context()
 
 	dueDate := time.Now().Add(10 * 24 * time.Hour)
-	err := srv.db.UpsertReleaseVersion(&model.ReleaseVersion{
+	err := srv.db.UpsertReleaseVersion(ctx, &model.ReleaseVersion{
 		Name:          "3.16.3",
 		S3Application: "quay-v3-16",
 		DueDate:       &dueDate,
@@ -244,12 +251,12 @@ func TestReleasesOverview(t *testing.T) {
 		t.Fatalf("upsert release: %v", err)
 	}
 
-	_, err = srv.db.CreateSnapshot("quay-v3-16", "quay-v3-16-snap-1", "quay", "abc123", "pr-1", true, false, "", time.Now())
+	_, err = srv.db.CreateSnapshot(ctx, "quay-v3-16", "quay-v3-16-snap-1", "quay", "abc123", "pr-1", true, false, "", time.Now())
 	if err != nil {
 		t.Fatalf("create snapshot: %v", err)
 	}
 
-	err = srv.db.UpsertJiraIssue(&model.JiraIssueRecord{
+	err = srv.db.UpsertJiraIssue(ctx, &model.JiraIssueRecord{
 		Key: "PROJQUAY-1", Summary: "fix bug", Status: "Open",
 		Priority: "Major", FixVersion: "3.16.3", IssueType: "Bug",
 		Link: "https://issues.redhat.com/browse/PROJQUAY-1", UpdatedAt: time.Now(),
@@ -305,6 +312,7 @@ func TestReleasesOverview(t *testing.T) {
 
 func TestGetIssueSummariesBatch(t *testing.T) {
 	srv := setupTestServer(t)
+	ctx := t.Context()
 
 	issues := []model.JiraIssueRecord{
 		{Key: "Q-1", Summary: "bug1", Status: "Open", Priority: "Major", FixVersion: "3.16.3", IssueType: "Bug", UpdatedAt: time.Now()},
@@ -312,12 +320,12 @@ func TestGetIssueSummariesBatch(t *testing.T) {
 		{Key: "Q-3", Summary: "task1", Status: "Verified", Priority: "Minor", FixVersion: "3.17.0", IssueType: "Story", UpdatedAt: time.Now()},
 	}
 	for _, issue := range issues {
-		if err := srv.db.UpsertJiraIssue(&issue); err != nil {
+		if err := srv.db.UpsertJiraIssue(ctx, &issue); err != nil {
 			t.Fatalf("upsert issue %s: %v", issue.Key, err)
 		}
 	}
 
-	summaries, err := srv.db.GetIssueSummariesBatch([]string{"3.16.3", "3.17.0", "nonexistent"})
+	summaries, err := srv.db.GetIssueSummariesBatch(ctx, []string{"3.16.3", "3.17.0", "nonexistent"})
 	if err != nil {
 		t.Fatalf("batch: %v", err)
 	}
@@ -351,10 +359,11 @@ func TestGetIssueSummariesBatch(t *testing.T) {
 
 func TestGetReleaseReadiness(t *testing.T) {
 	srv := setupTestServer(t)
+	ctx := t.Context()
 
 	// Create a release with a future due date
 	dueDate := time.Now().Add(10 * 24 * time.Hour)
-	err := srv.db.UpsertReleaseVersion(&model.ReleaseVersion{
+	err := srv.db.UpsertReleaseVersion(ctx, &model.ReleaseVersion{
 		Name:          "3.16.3",
 		S3Application: "quay-v3-16",
 		DueDate:       &dueDate,
@@ -364,7 +373,7 @@ func TestGetReleaseReadiness(t *testing.T) {
 	}
 
 	// Create a passing snapshot
-	_, err = srv.db.CreateSnapshot("quay-v3-16", "quay-v3-16-snap-1", "quay", "abc123", "pr-1", true, false, "", time.Now())
+	_, err = srv.db.CreateSnapshot(ctx, "quay-v3-16", "quay-v3-16-snap-1", "quay", "abc123", "pr-1", true, false, "", time.Now())
 	if err != nil {
 		t.Fatalf("create snapshot: %v", err)
 	}
