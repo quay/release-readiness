@@ -162,12 +162,6 @@ func (s *Server) handleGetReleaseIssueSummary(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, summary)
 }
 
-// ReadinessResponse represents the computed readiness signal for a release.
-type ReadinessResponse struct {
-	Signal  string `json:"signal"`  // "green", "yellow", "red"
-	Message string `json:"message"` // human-readable reason
-}
-
 func (s *Server) handleGetReleaseReadiness(w http.ResponseWriter, r *http.Request) {
 	version := r.PathValue("version")
 
@@ -177,18 +171,8 @@ func (s *Server) handleGetReleaseReadiness(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Already shipped — no further checks needed
-	if release.Released {
-		writeJSON(w, http.StatusOK, ReadinessResponse{
-			Signal:  "green",
-			Message: "Released",
-		})
-		return
-	}
-
 	issueSummary, _ := s.db.GetIssueSummary(version)
 
-	// Check test status from latest snapshot
 	testsPassed := false
 	if release.S3Application != "" {
 		apps, err := s.db.LatestSnapshotPerApplication()
@@ -202,13 +186,81 @@ func (s *Server) handleGetReleaseReadiness(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	writeJSON(w, http.StatusOK, computeReadiness(release, issueSummary, testsPassed))
+}
+
+func (s *Server) handleReleasesOverview(w http.ResponseWriter, r *http.Request) {
+	releases, err := s.db.ListAllReleaseVersions()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if releases == nil {
+		releases = []model.ReleaseVersion{}
+	}
+
+	apps, err := s.db.LatestSnapshotPerApplication()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	snapshotMap := make(map[string]*model.SnapshotRecord, len(apps))
+	for i := range apps {
+		if apps[i].LatestSnapshot != nil {
+			snapshotMap[apps[i].Application] = apps[i].LatestSnapshot
+		}
+	}
+
+	fixVersions := make([]string, len(releases))
+	for i, rel := range releases {
+		fixVersions[i] = rel.Name
+	}
+	issueSummaries, err := s.db.GetIssueSummariesBatch(fixVersions)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	overviews := make([]model.ReleaseOverview, len(releases))
+	for i, rel := range releases {
+		summary := issueSummaries[rel.Name]
+		var snap *model.SnapshotRecord
+		testsPassed := false
+		if rel.S3Application != "" {
+			if s := snapshotMap[rel.S3Application]; s != nil {
+				// Return snapshot metadata only (no components/test_results)
+				snapCopy := *s
+				snapCopy.Components = nil
+				snapCopy.TestResults = nil
+				snap = &snapCopy
+				testsPassed = s.TestsPassed
+			}
+		}
+
+		overviews[i] = model.ReleaseOverview{
+			Release:      rel,
+			IssueSummary: summary,
+			Readiness:    computeReadiness(&rel, summary, testsPassed),
+			Snapshot:     snap,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, overviews)
+}
+
+// computeReadiness derives a readiness signal from release metadata,
+// issue summary, and test status.
+func computeReadiness(release *model.ReleaseVersion, issueSummary *model.IssueSummary, testsPassed bool) model.ReadinessResponse {
+	if release.Released {
+		return model.ReadinessResponse{Signal: "green", Message: "Released"}
+	}
+
 	now := time.Now()
 	signal := "green"
 	message := "All checks passing"
 
 	openIssues := issueSummary != nil && issueSummary.Open > 0
 
-	// Check past due date first
 	if release.DueDate != nil && now.After(*release.DueDate) {
 		signal = "red"
 		message = "Past due date"
@@ -229,16 +281,16 @@ func (s *Server) handleGetReleaseReadiness(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	writeJSON(w, http.StatusOK, ReadinessResponse{
-		Signal:  signal,
-		Message: message,
-	})
+	return model.ReadinessResponse{Signal: signal, Message: message}
 }
 
 // --- Helpers ---
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
+	if status == http.StatusOK {
+		w.Header().Set("Cache-Control", "max-age=30")
+	}
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		log.Printf("json encode: %v", err)

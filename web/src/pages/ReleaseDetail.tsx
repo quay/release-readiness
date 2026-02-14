@@ -59,19 +59,19 @@ export default function ReleaseDetail() {
     () => getRelease(version!),
   );
   const { data: snapshot } = useCachedFetch(
-    version ? `releaseSnapshot:${version}` : null,
+    version ? `snapshot:${version}` : null,
     () => getReleaseSnapshot(version!),
   );
   const { data: issues } = useCachedFetch(
-    version ? `releaseIssues:${version}` : null,
+    version ? `issues:${version}` : null,
     () => listReleaseIssues(version!),
   );
   const { data: issueSummary } = useCachedFetch(
-    version ? `releaseIssueSummary:${version}` : null,
+    version ? `issueSummary:${version}` : null,
     () => getReleaseIssueSummary(version!),
   );
   const { data: readinessSignal } = useCachedFetch(
-    version ? `releaseReadiness:${version}` : null,
+    version ? `readiness:${version}` : null,
     () => getReleaseReadiness(version!),
   );
 

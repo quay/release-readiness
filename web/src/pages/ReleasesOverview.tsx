@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   PageSection,
@@ -36,18 +36,14 @@ import {
   ThIcon,
 } from "@patternfly/react-icons";
 import type {
+  ReleaseOverview,
   ReleaseVersion,
   IssueSummary,
   ReadinessResponse,
   SnapshotRecord,
 } from "../api/types";
-import {
-  listReleases,
-  getReleaseIssueSummary,
-  getReleaseReadiness,
-  getReleaseSnapshot,
-} from "../api/client";
-import { useCachedFetch } from "../hooks/useCachedFetch";
+import { listReleasesOverview } from "../api/client";
+import { useCachedFetch, seedCache } from "../hooks/useCachedFetch";
 import { useConfig } from "../hooks/useConfig";
 import { formatReleaseName, jiraIssueUrl } from "../utils/links";
 
@@ -62,10 +58,22 @@ export default function ReleasesOverview() {
 
   const config = useConfig();
 
-  const { data: releases, loading } = useCachedFetch(
-    "releases",
-    listReleases,
+  const { data: overviews, loading } = useCachedFetch(
+    "releasesOverview",
+    listReleasesOverview,
   );
+
+  // Seed individual cache entries so detail pages can reuse data
+  useEffect(() => {
+    if (!overviews) return;
+    for (const ov of overviews) {
+      seedCache(`issueSummary:${ov.release.name}`, ov.issue_summary);
+      seedCache(`readiness:${ov.release.name}`, ov.readiness);
+      if (ov.snapshot) {
+        seedCache(`snapshot:${ov.release.name}`, ov.snapshot);
+      }
+    }
+  }, [overviews]);
 
   const [releasedExpanded, setReleasedExpanded] = useState(false);
 
@@ -81,7 +89,7 @@ export default function ReleasesOverview() {
     });
   };
 
-  if (loading && !releases) {
+  if (loading && !overviews) {
     return (
       <PageSection>
         <div style={{ textAlign: "center" }}>
@@ -91,11 +99,11 @@ export default function ReleasesOverview() {
     );
   }
 
-  const releaseList = releases ?? [];
-  const activeReleases = releaseList.filter((r) => !r.released);
-  const releasedReleases = releaseList.filter((r) => r.released);
+  const overviewList = overviews ?? [];
+  const active = overviewList.filter((ov) => !ov.release.released);
+  const released = overviewList.filter((ov) => ov.release.released);
 
-  if (releaseList.length === 0) {
+  if (overviewList.length === 0) {
     return (
       <PageSection>
         <EmptyState>
@@ -112,6 +120,17 @@ export default function ReleasesOverview() {
   }
 
   const galleryMinWidth = viewMode === "compact" ? "300px" : "400px";
+
+  const filterOverview = (ov: ReleaseOverview): boolean => {
+    const displayName = formatReleaseName(ov.release.name);
+    if (query && !displayName.toLowerCase().includes(query.toLowerCase()) && !ov.release.name.toLowerCase().includes(query.toLowerCase())) {
+      return false;
+    }
+    if (signalFilter !== "all" && ov.readiness.signal !== signalFilter) {
+      return false;
+    }
+    return true;
+  };
 
   return (
     <PageSection>
@@ -159,32 +178,34 @@ export default function ReleasesOverview() {
       </Toolbar>
 
       <Gallery hasGutter minWidths={{ default: galleryMinWidth }}>
-        {activeReleases.map((rel) => (
-          <ReleaseCardWrapper
-            key={rel.name}
-            release={rel}
-            query={query}
-            signalFilter={signalFilter}
+        {active.filter(filterOverview).map((ov) => (
+          <ReleaseCard
+            key={ov.release.name}
+            release={ov.release}
+            issueSummary={ov.issue_summary}
+            readinessSignal={ov.readiness}
+            snapshot={ov.snapshot}
             viewMode={viewMode}
             jiraBaseUrl={config?.jira_base_url}
           />
         ))}
       </Gallery>
 
-      {releasedReleases.length > 0 && (
+      {released.length > 0 && (
         <ExpandableSection
-          toggleText={`Released (${releasedReleases.length})`}
+          toggleText={`Released (${released.length})`}
           isExpanded={releasedExpanded}
           onToggle={(_e, val) => setReleasedExpanded(val)}
           style={{ marginTop: "1.5rem" }}
         >
           <Gallery hasGutter minWidths={{ default: galleryMinWidth }}>
-            {releasedReleases.map((rel) => (
-              <ReleaseCardWrapper
-                key={rel.name}
-                release={rel}
-                query={query}
-                signalFilter={signalFilter}
+            {released.filter(filterOverview).map((ov) => (
+              <ReleaseCard
+                key={ov.release.name}
+                release={ov.release}
+                issueSummary={ov.issue_summary}
+                readinessSignal={ov.readiness}
+                snapshot={ov.snapshot}
                 viewMode={viewMode}
                 jiraBaseUrl={config?.jira_base_url}
               />
@@ -193,53 +214,6 @@ export default function ReleasesOverview() {
         </ExpandableSection>
       )}
     </PageSection>
-  );
-}
-
-function ReleaseCardWrapper({
-  release,
-  query,
-  signalFilter,
-  viewMode,
-  jiraBaseUrl,
-}: {
-  release: ReleaseVersion;
-  query: string;
-  signalFilter: SignalFilter;
-  viewMode: ViewMode;
-  jiraBaseUrl?: string;
-}) {
-  const { data: issueSummary } = useCachedFetch(
-    `issueSummary:${release.name}`,
-    () => getReleaseIssueSummary(release.name),
-  );
-  const { data: readinessSignal } = useCachedFetch(
-    `readiness:${release.name}`,
-    () => getReleaseReadiness(release.name),
-  );
-  const { data: snapshot } = useCachedFetch(
-    release.s3_application ? `snapshot:${release.name}` : null,
-    () => getReleaseSnapshot(release.name),
-  );
-
-  // Apply filters
-  const displayName = formatReleaseName(release.name);
-  if (query && !displayName.toLowerCase().includes(query.toLowerCase()) && !release.name.toLowerCase().includes(query.toLowerCase())) {
-    return null;
-  }
-  if (signalFilter !== "all" && readinessSignal?.signal !== signalFilter) {
-    return null;
-  }
-
-  return (
-    <ReleaseCard
-      release={release}
-      issueSummary={issueSummary}
-      readinessSignal={readinessSignal}
-      snapshot={snapshot}
-      viewMode={viewMode}
-      jiraBaseUrl={jiraBaseUrl}
-    />
   );
 }
 

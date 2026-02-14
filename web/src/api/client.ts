@@ -4,6 +4,7 @@ import type {
   IssueSummary,
   JiraIssue,
   ReadinessResponse,
+  ReleaseOverview,
   ReleaseVersion,
   SnapshotRecord,
 } from "./types";
@@ -46,6 +47,10 @@ export function getSnapshot(name: string): Promise<SnapshotRecord> {
 
 export function listReleases(): Promise<ReleaseVersion[]> {
   return fetchJSON(`${BASE}/releases`);
+}
+
+export function listReleasesOverview(): Promise<ReleaseOverview[]> {
+  return fetchJSON(`${BASE}/releases/overview`);
 }
 
 export function getRelease(version: string): Promise<ReleaseVersion> {
