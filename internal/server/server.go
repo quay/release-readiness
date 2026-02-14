@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/quay/build-dashboard/internal/db"
-	s3client "github.com/quay/build-dashboard/internal/s3"
+	"github.com/quay/release-readiness/internal/db"
+	s3client "github.com/quay/release-readiness/internal/s3"
 )
 
 type Server struct {

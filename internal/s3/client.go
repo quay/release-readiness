@@ -13,15 +13,15 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"github.com/quay/build-dashboard/internal/junit"
-	"github.com/quay/build-dashboard/internal/model"
+	"github.com/quay/release-readiness/internal/junit"
+	"github.com/quay/release-readiness/internal/model"
 )
 
 // Config holds the settings needed to connect to an S3-compatible store.
 type Config struct {
 	Endpoint  string // custom endpoint URL (e.g. http://localhost:3900)
 	Region    string // "garage" for GarageFS, "us-east-1" for real S3
-	Bucket    string // "quay-build-dashboard"
+	Bucket    string // "quay-release-readiness"
 	AccessKey string
 	SecretKey string
 }

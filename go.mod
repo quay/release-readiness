@@ -1,4 +1,4 @@
-module github.com/quay/build-dashboard
+module github.com/quay/release-readiness
 
 go 1.24.0
 

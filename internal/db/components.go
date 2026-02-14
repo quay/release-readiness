@@ -3,7 +3,7 @@ package db
 import (
 	"time"
 
-	"github.com/quay/build-dashboard/internal/model"
+	"github.com/quay/release-readiness/internal/model"
 )
 
 func (d *DB) ListComponents() ([]model.Component, error) {

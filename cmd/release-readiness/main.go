@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/quay/build-dashboard/internal/db"
-	"github.com/quay/build-dashboard/internal/jira"
-	"github.com/quay/build-dashboard/internal/model"
-	s3client "github.com/quay/build-dashboard/internal/s3"
-	"github.com/quay/build-dashboard/internal/server"
+	"github.com/quay/release-readiness/internal/db"
+	"github.com/quay/release-readiness/internal/jira"
+	"github.com/quay/release-readiness/internal/model"
+	s3client "github.com/quay/release-readiness/internal/s3"
+	"github.com/quay/release-readiness/internal/server"
 )
 
 func main() {
@@ -33,7 +33,7 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, `Usage: dashboard <command>
+	fmt.Fprintf(os.Stderr, `Usage: release-readiness <command>
 
 Commands:
   serve    Start the HTTP server

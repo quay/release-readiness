@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/quay/build-dashboard/internal/db"
-	"github.com/quay/build-dashboard/internal/model"
+	"github.com/quay/release-readiness/internal/db"
+	"github.com/quay/release-readiness/internal/model"
 )
 
 func setupTestServer(t *testing.T) *Server {

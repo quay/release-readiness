@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/quay/build-dashboard/web"
+	"github.com/quay/release-readiness/web"
 )
 
 func (s *Server) registerRoutes(mux *http.ServeMux) {

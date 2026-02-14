@@ -1,13 +1,13 @@
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: build-dashboard
+  name: release-readiness
   labels:
-    app: build-dashboard
+    app: release-readiness
 spec:
   to:
     kind: Service
-    name: build-dashboard
+    name: release-readiness
   port:
     targetPort: 8080
   tls:

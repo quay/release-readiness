@@ -1,24 +1,24 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: build-dashboard
+  name: release-readiness
   labels:
-    app: build-dashboard
+    app: release-readiness
 spec:
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: build-dashboard
+      app: release-readiness
   template:
     metadata:
       labels:
-        app: build-dashboard
+        app: release-readiness
     spec:
       containers:
         - name: dashboard
-          image: quay.io/quay/build-dashboard:latest
+          image: quay.io/quay/release-readiness:latest
           ports:
             - containerPort: 8080
               protocol: TCP
@@ -47,4 +47,4 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: build-dashboard-data
+            claimName: release-readiness-data

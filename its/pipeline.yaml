@@ -1,7 +1,7 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: build-dashboard-its
+  name: release-readiness-its
 spec:
   params:
     - name: SNAPSHOT
@@ -25,7 +25,7 @@ spec:
             type: string
         steps:
           - name: parse-and-register
-            image: quay.io/quay/build-dashboard:latest
+            image: quay.io/quay/release-readiness:latest
             script: |
               #!/bin/sh
               set -e
@@ -95,7 +95,7 @@ spec:
             type: string
         steps:
           - name: report
-            image: quay.io/quay/build-dashboard:latest
+            image: quay.io/quay/release-readiness:latest
             script: |
               #!/bin/sh
               set -e

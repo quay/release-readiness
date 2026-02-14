@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/quay/build-dashboard/internal/model"
+	"github.com/quay/release-readiness/internal/model"
 )
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {

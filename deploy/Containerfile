@@ -13,14 +13,14 @@ COPY --chown=1001:0 go.mod go.sum ./
 RUN go mod download
 COPY --chown=1001:0 . .
 COPY --from=frontend /opt/app-root/src/dist ./web/dist/
-RUN CGO_ENABLED=0 go build -o /opt/app-root/dashboard ./cmd/dashboard/
+RUN CGO_ENABLED=0 go build -o /opt/app-root/release-readiness ./cmd/release-readiness/
 
 FROM registry.access.redhat.com/ubi9-micro:latest
 
-COPY --from=builder /opt/app-root/dashboard /usr/local/bin/dashboard
+COPY --from=builder /opt/app-root/release-readiness /usr/local/bin/release-readiness
 
 EXPOSE 8080
 VOLUME /data
 
-ENTRYPOINT ["dashboard"]
-CMD ["serve", "-addr", ":8080", "-db", "/data/dashboard.db"]
+ENTRYPOINT ["release-readiness"]
+CMD ["serve", "-addr", ":8080", "-db", "/data/release-readiness.db"]

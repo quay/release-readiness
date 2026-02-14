@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: build-dashboard
+  name: release-readiness
   labels:
-    app: build-dashboard
+    app: release-readiness
 spec:
   type: ClusterIP
   ports:
@@ -11,4 +11,4 @@ spec:
       targetPort: 8080
       protocol: TCP
   selector:
-    app: build-dashboard
+    app: release-readiness

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/quay/build-dashboard/internal/model"
+	"github.com/quay/release-readiness/internal/model"
 )
 
 // UpsertJiraIssue inserts or updates a JIRA issue by key.
