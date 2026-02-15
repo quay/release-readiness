@@ -10,20 +10,22 @@ import {
 	Toolbar,
 	ToolbarContent,
 	ToolbarItem,
+	Bullseye,
+	Spinner,
 } from "@patternfly/react-core";
 import {
 	MoonIcon,
 	OutlinedQuestionCircleIcon,
 	SunIcon,
 } from "@patternfly/react-icons";
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import "@patternfly/react-core/dist/styles/base.css";
 import "./theme.css";
 
-import ReleaseDetail from "./pages/ReleaseDetail";
-import ReleasesOverview from "./pages/ReleasesOverview";
-import SnapshotsList from "./pages/SnapshotsList";
+const ReleasesOverview = lazy(() => import("./pages/ReleasesOverview"));
+const ReleaseDetail = lazy(() => import("./pages/ReleaseDetail"));
+const SnapshotsList = lazy(() => import("./pages/SnapshotsList"));
 
 type Theme = "light" | "dark";
 
@@ -123,14 +125,16 @@ export default function App() {
 	return (
 		<BrowserRouter>
 			<AppLayout>
-				<Routes>
-					<Route path="/" element={<ReleasesOverview />} />
-					<Route path="/releases/:version" element={<ReleaseDetail />} />
-					<Route
-						path="/releases/:version/snapshots"
-						element={<SnapshotsList />}
-					/>
-				</Routes>
+				<Suspense fallback={<Bullseye><Spinner /></Bullseye>}>
+					<Routes>
+						<Route path="/" element={<ReleasesOverview />} />
+						<Route path="/releases/:version" element={<ReleaseDetail />} />
+						<Route
+							path="/releases/:version/snapshots"
+							element={<SnapshotsList />}
+						/>
+					</Routes>
+				</Suspense>
 			</AppLayout>
 		</BrowserRouter>
 	);
