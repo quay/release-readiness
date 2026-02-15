@@ -23,4 +23,4 @@ EXPOSE 8080
 VOLUME /data
 
 ENTRYPOINT ["release-readiness"]
-CMD ["serve", "-addr", ":8080", "-db", "/data/release-readiness.db"]
+CMD ["-addr", ":8080", "-db", "/data/release-readiness.db"]

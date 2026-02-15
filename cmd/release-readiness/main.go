@@ -20,50 +20,25 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		printUsage()
-		os.Exit(1)
-	}
-
-	switch os.Args[1] {
-	case "serve":
-		cmdServe(os.Args[2:])
-	default:
-		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", os.Args[1])
-		printUsage()
-		os.Exit(1)
-	}
-}
-
-func printUsage() {
-	fmt.Fprintf(os.Stderr, `Usage: release-readiness <command>
-
-Commands:
-  serve    Start the HTTP server
-`)
-}
-
-func cmdServe(args []string) {
-	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	addr := fs.String("addr", ":8080", "listen address")
-	dbPath := fs.String("db", "dashboard.db", "SQLite database path")
+	addr := flag.String("addr", ":8080", "listen address")
+	dbPath := flag.String("db", "dashboard.db", "SQLite database path")
 
 	// S3 flags
-	s3Endpoint := fs.String("s3-endpoint", os.Getenv("S3_ENDPOINT"), "S3 endpoint URL (e.g. http://localhost:3900)")
-	s3Region := fs.String("s3-region", envOrDefault("S3_REGION", "us-east-1"), "S3 region")
-	s3Bucket := fs.String("s3-bucket", os.Getenv("S3_BUCKET"), "S3 bucket name")
-	s3AccessKey := fs.String("s3-access-key", os.Getenv("AWS_ACCESS_KEY_ID"), "S3 access key")
-	s3SecretKey := fs.String("s3-secret-key", os.Getenv("AWS_SECRET_ACCESS_KEY"), "S3 secret key")
-	s3PollInterval := fs.Duration("s3-poll-interval", 30*time.Second, "S3 sync poll interval")
+	s3Endpoint := flag.String("s3-endpoint", os.Getenv("S3_ENDPOINT"), "S3 endpoint URL (e.g. http://localhost:3900)")
+	s3Region := flag.String("s3-region", envOrDefault("S3_REGION", "us-east-1"), "S3 region")
+	s3Bucket := flag.String("s3-bucket", os.Getenv("S3_BUCKET"), "S3 bucket name")
+	s3AccessKey := flag.String("s3-access-key", os.Getenv("AWS_ACCESS_KEY_ID"), "S3 access key")
+	s3SecretKey := flag.String("s3-secret-key", os.Getenv("AWS_SECRET_ACCESS_KEY"), "S3 secret key")
+	s3PollInterval := flag.Duration("s3-poll-interval", 30*time.Second, "S3 sync poll interval")
 
 	// JIRA flags
-	jiraURL := fs.String("jira-url", envOrDefault("JIRA_URL", "https://issues.redhat.com"), "JIRA server URL")
-	jiraToken := fs.String("jira-token", os.Getenv("JIRA_TOKEN"), "JIRA personal access token")
-	jiraProject := fs.String("jira-project", envOrDefault("JIRA_PROJECT", "PROJQUAY"), "JIRA project key")
-	jiraTargetVersionField := fs.String("jira-target-version-field", envOrDefault("JIRA_TARGET_VERSION_FIELD", "customfield_12319940"), "JIRA custom field name for Target Version")
-	jiraPollInterval := fs.Duration("jira-poll-interval", 5*time.Minute, "JIRA sync poll interval")
+	jiraURL := flag.String("jira-url", envOrDefault("JIRA_URL", "https://issues.redhat.com"), "JIRA server URL")
+	jiraToken := flag.String("jira-token", os.Getenv("JIRA_TOKEN"), "JIRA personal access token")
+	jiraProject := flag.String("jira-project", envOrDefault("JIRA_PROJECT", "PROJQUAY"), "JIRA project key")
+	jiraTargetVersionField := flag.String("jira-target-version-field", envOrDefault("JIRA_TARGET_VERSION_FIELD", "customfield_12319940"), "JIRA custom field name for Target Version")
+	jiraPollInterval := flag.Duration("jira-poll-interval", 5*time.Minute, "JIRA sync poll interval")
 
-	_ = fs.Parse(args)
+	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	slog.SetDefault(logger)

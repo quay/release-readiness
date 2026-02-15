@@ -30,7 +30,7 @@ podman build -f deploy/Containerfile -t release-readiness .
 ### Running locally
 ```bash
 # Start backend (source dev/s3.env for S3 creds)
-./release-readiness serve -addr :8088 -db release-readiness.db \
+./release-readiness -addr :8088 -db release-readiness.db \
   -s3-endpoint http://localhost:3900 -s3-region garage \
   -s3-bucket quay-release-readiness \
   -s3-access-key $AWS_ACCESS_KEY_ID -s3-secret-key $AWS_SECRET_ACCESS_KEY \
@@ -45,7 +45,7 @@ The Vite dev server proxies `/api` requests to `localhost:8088` (the Go backend)
 ## Architecture
 
 ### Backend (`internal/`)
-- **`cmd/release-readiness/main.go`** — CLI entry point. Single `serve` command. Runs background sync loops for S3 and JIRA.
+- **`cmd/release-readiness/main.go`** — CLI entry point. Runs background sync loops for S3 and JIRA.
 - **`internal/server/`** — HTTP server using Go stdlib `net/http`. Routes registered in `routes.go`, API handlers in `handlers_api.go`. The React SPA is served from embedded `web/dist/` via `go:embed` with SPA fallback routing.
 - **`internal/db/`** — SQLite data layer (pure-Go driver `modernc.org/sqlite`, no CGO). Schema migrations in `migrations.go`. WAL mode enabled.
 - **`internal/s3/`** — AWS SDK v2 client for fetching snapshot data from S3/Garage object storage.
