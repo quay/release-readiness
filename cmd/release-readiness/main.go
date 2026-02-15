@@ -3,18 +3,15 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
-	"path"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/quay/release-readiness/internal/db"
 	"github.com/quay/release-readiness/internal/jira"
-	"github.com/quay/release-readiness/internal/model"
 	s3client "github.com/quay/release-readiness/internal/s3"
 	"github.com/quay/release-readiness/internal/server"
 )
@@ -70,10 +67,11 @@ func main() {
 			os.Exit(1)
 		}
 		logger.Info("s3 sync enabled", "bucket", *s3Bucket, "endpoint", *s3Endpoint, "interval", *s3PollInterval)
+		syncer := s3client.NewSyncer(s3c, database, s3Log)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runS3SyncLoop(ctx, database, s3c, *s3PollInterval, s3Log)
+			syncer.Run(ctx, *s3PollInterval)
 		}()
 	}
 
@@ -111,136 +109,3 @@ func envOrDefault(key, fallback string) string {
 	}
 	return fallback
 }
-
-// --- S3 Sync ---
-
-func runS3SyncLoop(ctx context.Context, database *db.DB, s3c *s3client.Client, interval time.Duration, logger *slog.Logger) {
-	syncS3Once(ctx, database, s3c, logger)
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			logger.Info("stopping")
-			return
-		case <-ticker.C:
-			syncS3Once(ctx, database, s3c, logger)
-		}
-	}
-}
-
-func syncS3Once(ctx context.Context, database *db.DB, s3c *s3client.Client, logger *slog.Logger) {
-	apps, err := s3c.ListApplications(ctx)
-	if err != nil {
-		logger.Error("list applications", "error", err)
-		return
-	}
-
-	for _, app := range apps {
-		keys, err := s3c.ListSnapshots(ctx, app)
-		if err != nil {
-			logger.Error("list snapshots", "application", app, "error", err)
-			continue
-		}
-
-		for _, key := range keys {
-			snap, err := s3c.GetSnapshot(ctx, key)
-			if err != nil {
-				logger.Error("get snapshot", "key", key, "error", err)
-				continue
-			}
-
-			exists, err := database.SnapshotExistsByName(ctx, snap.Snapshot)
-			if err != nil {
-				logger.Error("check snapshot", "snapshot", snap.Snapshot, "error", err)
-				continue
-			}
-			if exists {
-				continue
-			}
-
-			logger.Info("new snapshot", "snapshot", snap.Snapshot, "application", app)
-
-			if err := ingestSnapshot(ctx, database, s3c, key, snap, logger); err != nil {
-				logger.Error("ingest snapshot", "snapshot", snap.Snapshot, "error", err)
-			}
-		}
-	}
-}
-
-func ingestSnapshot(ctx context.Context, database *db.DB, s3c *s3client.Client, key string, snap *model.Snapshot, logger *slog.Logger) error {
-	// Derive the snapshot directory prefix from the key.
-	// key is like "{app}/snapshots/{snapshot-name}/snapshot.json"
-	// We need "{app}/snapshots/{snapshot-name}/" as the base for JUnit paths.
-	snapshotDir := path.Dir(key) + "/"
-
-	// Fetch JUnit data for each test result before writing to DB.
-	for i, tr := range snap.TestResults {
-		junitPrefix := snapshotDir + "junit/" + tr.Scenario + "/"
-		result, err := s3c.GetTestResults(ctx, junitPrefix)
-		if err != nil {
-			logger.Debug("no junit data", "scenario", tr.Scenario, "path", junitPrefix)
-			continue
-		}
-		snap.TestResults[i].Summary = &model.TestSummary{
-			Total:       result.Total,
-			Passed:      result.Passed,
-			Failed:      result.Failed,
-			Skipped:     result.Skipped,
-			DurationSec: result.DurationSec,
-		}
-	}
-
-	snapshotRecord, err := database.CreateSnapshot(
-		ctx,
-		snap.Application,
-		snap.Snapshot,
-		snap.Trigger.Component,
-		snap.Trigger.GitSHA,
-		snap.Trigger.PipelineRun,
-		snap.Readiness.TestsPassed,
-		snap.Readiness.Released,
-		snap.Readiness.ReleaseBlockedReason,
-		snap.CreatedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("create snapshot: %w", err)
-	}
-
-	for _, comp := range snap.Components {
-		if _, err := database.EnsureComponent(ctx, comp.Name); err != nil {
-			return fmt.Errorf("ensure component %s: %w", comp.Name, err)
-		}
-
-		if err := database.CreateSnapshotComponent(ctx, snapshotRecord.ID, comp.Name, comp.GitRevision, comp.ContainerImage, comp.GitURL); err != nil {
-			return fmt.Errorf("create snapshot component %s: %w", comp.Name, err)
-		}
-	}
-
-	for _, tr := range snap.TestResults {
-		total, passed, failed, skipped := 0, 0, 0, 0
-		var durationSec float64
-		if tr.Summary != nil {
-			total = tr.Summary.Total
-			passed = tr.Summary.Passed
-			failed = tr.Summary.Failed
-			skipped = tr.Summary.Skipped
-			durationSec = tr.Summary.DurationSec
-		}
-
-		if err := database.CreateSnapshotTestResult(
-			ctx,
-			snapshotRecord.ID,
-			tr.Scenario,
-			tr.Status,
-			tr.PipelineRun,
-			total, passed, failed, skipped,
-			durationSec,
-		); err != nil {
-			return fmt.Errorf("create snapshot test result %s: %w", tr.Scenario, err)
-		}
-	}
-
-	return nil
-}
-
