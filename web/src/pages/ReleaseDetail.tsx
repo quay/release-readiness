@@ -45,15 +45,14 @@ import type {
 	ReleaseVersion,
 	SnapshotRecord,
 } from "../api/types";
+import ExpandableCard from "../components/ExpandableCard";
+import GitShaLink from "../components/GitShaLink";
+import PriorityLabel from "../components/PriorityLabel";
 import StatusLabel from "../components/StatusLabel";
 import { useCachedFetch } from "../hooks/useCachedFetch";
 import { useConfig } from "../hooks/useConfig";
-import {
-	formatReleaseName,
-	githubCommitUrl,
-	jiraIssueUrl,
-	quayImageUrl,
-} from "../utils/links";
+import { formatDuration } from "../utils/format";
+import { formatReleaseName, jiraIssueUrl, quayImageUrl } from "../utils/links";
 
 export default function ReleaseDetail() {
 	const { version } = useParams<{ version: string }>();
@@ -158,39 +157,15 @@ export default function ReleaseDetail() {
 								flexWrap={{ default: "nowrap" }}
 							>
 								<FlexItem style={{ textAlign: "center" }}>
-									<div
-										style={{
-											fontWeight: 600,
-											marginBottom: "0.25rem",
-											fontSize: "0.85rem",
-										}}
-									>
-										Snapshot
-									</div>
+									<div className="rr-label">Snapshot</div>
 									<div>{snapshot.name}</div>
 								</FlexItem>
 								<FlexItem style={{ textAlign: "center" }}>
-									<div
-										style={{
-											fontWeight: 600,
-											marginBottom: "0.25rem",
-											fontSize: "0.85rem",
-										}}
-									>
-										Trigger Component
-									</div>
+									<div className="rr-label">Trigger Component</div>
 									<div>{snapshot.trigger_component}</div>
 								</FlexItem>
 								<FlexItem style={{ textAlign: "center" }}>
-									<div
-										style={{
-											fontWeight: 600,
-											marginBottom: "0.25rem",
-											fontSize: "0.85rem",
-										}}
-									>
-										Git SHA
-									</div>
+									<div className="rr-label">Git SHA</div>
 									<div>
 										<GitShaLink
 											component={snapshot.trigger_component}
@@ -205,15 +180,7 @@ export default function ReleaseDetail() {
 								</FlexItem>
 								{snapshot.trigger_pipeline_run && (
 									<FlexItem style={{ textAlign: "center" }}>
-										<div
-											style={{
-												fontWeight: 600,
-												marginBottom: "0.25rem",
-												fontSize: "0.85rem",
-											}}
-										>
-											Pipeline Run
-										</div>
+										<div className="rr-label">Pipeline Run</div>
 										<div>
 											<a
 												href={snapshot.trigger_pipeline_run}
@@ -226,15 +193,7 @@ export default function ReleaseDetail() {
 									</FlexItem>
 								)}
 								<FlexItem style={{ textAlign: "center" }}>
-									<div
-										style={{
-											fontWeight: 600,
-											marginBottom: "0.25rem",
-											fontSize: "0.85rem",
-										}}
-									>
-										Tests
-									</div>
+									<div className="rr-label">Tests</div>
 									<div>
 										{snapshot.tests_passed ? (
 											<Label color="green" icon={<CheckCircleIcon />}>
@@ -248,15 +207,7 @@ export default function ReleaseDetail() {
 									</div>
 								</FlexItem>
 								<FlexItem style={{ textAlign: "center" }}>
-									<div
-										style={{
-											fontWeight: 600,
-											marginBottom: "0.25rem",
-											fontSize: "0.85rem",
-										}}
-									>
-										Released
-									</div>
+									<div className="rr-label">Released</div>
 									<div>
 										{snapshot.released ? (
 											<Label color="green">Yes</Label>
@@ -267,28 +218,12 @@ export default function ReleaseDetail() {
 								</FlexItem>
 								{snapshot.release_blocked_reason && (
 									<FlexItem style={{ textAlign: "center" }}>
-										<div
-											style={{
-												fontWeight: 600,
-												marginBottom: "0.25rem",
-												fontSize: "0.85rem",
-											}}
-										>
-											Blocked
-										</div>
+										<div className="rr-label">Blocked</div>
 										<div>{snapshot.release_blocked_reason}</div>
 									</FlexItem>
 								)}
 								<FlexItem style={{ textAlign: "center" }}>
-									<div
-										style={{
-											fontWeight: 600,
-											marginBottom: "0.25rem",
-											fontSize: "0.85rem",
-										}}
-									>
-										Created
-									</div>
+									<div className="rr-label">Created</div>
 									<div>{new Date(snapshot.created_at).toLocaleString()}</div>
 								</FlexItem>
 							</Flex>
@@ -408,53 +343,6 @@ export default function ReleaseDetail() {
 	);
 }
 
-function ExpandableCard({
-	title,
-	children,
-}: {
-	title: string;
-	children: React.ReactNode;
-}) {
-	const [expanded, setExpanded] = useState(true);
-	return (
-		<Card isCompact style={{ marginBottom: "1rem" }}>
-			<CardBody>
-				<ExpandableSection
-					toggleText={title}
-					isExpanded={expanded}
-					onToggle={(_e, val) => setExpanded(val)}
-				>
-					{children}
-				</ExpandableSection>
-			</CardBody>
-		</Card>
-	);
-}
-
-function GitShaLink({
-	component,
-	sha,
-	gitUrl,
-}: {
-	component: string;
-	sha: string;
-	gitUrl?: string;
-}) {
-	if (!sha) return null;
-	const display = sha.substring(0, 12);
-	const url = gitUrl
-		? `${gitUrl.replace(/\.git$/, "").replace(/\/+$/, "")}/commit/${sha}`
-		: githubCommitUrl(component, sha);
-	if (url) {
-		return (
-			<a href={url} target="_blank" rel="noopener noreferrer">
-				<code>{display}</code>
-			</a>
-		);
-	}
-	return <code>{display}</code>;
-}
-
 function ReleaseSignal({
 	release,
 	readiness,
@@ -497,30 +385,14 @@ function ReleaseSignal({
 				<Flex justifyContent={{ default: "justifyContentSpaceEvenly" }}>
 					{readiness && (
 						<FlexItem style={{ textAlign: "center" }}>
-							<div
-								style={{
-									fontWeight: 600,
-									marginBottom: "0.25rem",
-									fontSize: "0.85rem",
-								}}
-							>
-								Signal
-							</div>
+							<div className="rr-label">Signal</div>
 							<Label color={signalColor} isCompact>
 								{readiness.message}
 							</Label>
 						</FlexItem>
 					)}
 					<FlexItem style={{ textAlign: "center" }}>
-						<div
-							style={{
-								fontWeight: 600,
-								marginBottom: "0.25rem",
-								fontSize: "0.85rem",
-							}}
-						>
-							Target
-						</div>
+						<div className="rr-label">Target</div>
 						<div>
 							{targetDate ? targetDate.toLocaleDateString() : "TBD"}
 							{daysUntil !== null && ` (${daysUntil} days)`}
@@ -528,15 +400,7 @@ function ReleaseSignal({
 					</FlexItem>
 					{release.release_ticket_key && (
 						<FlexItem style={{ textAlign: "center" }}>
-							<div
-								style={{
-									fontWeight: 600,
-									marginBottom: "0.25rem",
-									fontSize: "0.85rem",
-								}}
-							>
-								Ticket
-							</div>
+							<div className="rr-label">Ticket</div>
 							<div>
 								{ticketLink ? (
 									<a
@@ -554,29 +418,13 @@ function ReleaseSignal({
 					)}
 					{release.release_ticket_assignee && (
 						<FlexItem style={{ textAlign: "center" }}>
-							<div
-								style={{
-									fontWeight: 600,
-									marginBottom: "0.25rem",
-									fontSize: "0.85rem",
-								}}
-							>
-								Assignee
-							</div>
+							<div className="rr-label">Assignee</div>
 							<div>{release.release_ticket_assignee}</div>
 						</FlexItem>
 					)}
 					{release.released && (
 						<FlexItem style={{ textAlign: "center" }}>
-							<div
-								style={{
-									fontWeight: 600,
-									marginBottom: "0.25rem",
-									fontSize: "0.85rem",
-								}}
-							>
-								Status
-							</div>
+							<div className="rr-label">Status</div>
 							<Label color="green">Released</Label>
 						</FlexItem>
 					)}
@@ -741,22 +589,4 @@ function IssuesTable({ issues }: { issues: JiraIssue[] }) {
 			</Tbody>
 		</Table>
 	);
-}
-
-function PriorityLabel({ priority }: { priority: string }) {
-	const p = priority.toLowerCase();
-	if (p === "critical" || p === "blocker") {
-		return <Label color="red">{priority}</Label>;
-	}
-	if (p === "major") {
-		return <Label color="yellow">{priority}</Label>;
-	}
-	return <Label color="grey">{priority}</Label>;
-}
-
-function formatDuration(seconds: number): string {
-	if (seconds < 60) return `${seconds.toFixed(1)}s`;
-	const m = Math.floor(seconds / 60);
-	const s = Math.round(seconds % 60);
-	return `${m}m ${s}s`;
 }

@@ -6,12 +6,24 @@ interface CacheEntry<T> {
 }
 
 const cache = new Map<string, CacheEntry<unknown>>();
+const MAX_CACHE_SIZE = 100;
 
 const DEFAULT_TTL_MS = 60_000;
 
+function cacheSet(key: string, entry: CacheEntry<unknown>): void {
+	// Delete first so re-insertion moves the key to the end (Map ordering)
+	cache.delete(key);
+	cache.set(key, entry);
+	if (cache.size > MAX_CACHE_SIZE) {
+		// Evict oldest entry (first key in insertion order)
+		const oldest = cache.keys().next().value;
+		if (oldest !== undefined) cache.delete(oldest);
+	}
+}
+
 /** Seed an entry into the shared cache so subsequent useCachedFetch calls can reuse it. */
 export function seedCache<T>(key: string, data: T): void {
-	cache.set(key, { data, timestamp: Date.now() });
+	cacheSet(key, { data, timestamp: Date.now() });
 }
 
 export function useCachedFetch<T>(
@@ -57,7 +69,7 @@ export function useCachedFetch<T>(
 		fetcherRef
 			.current()
 			.then((result) => {
-				cache.set(key, { data: result, timestamp: Date.now() });
+				cacheSet(key, { data: result, timestamp: Date.now() });
 				setData(result);
 				setError(undefined);
 			})

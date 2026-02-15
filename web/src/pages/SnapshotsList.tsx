@@ -23,6 +23,7 @@ export default function SnapshotsList() {
 	const { version } = useParams<{ version: string }>();
 	const [snapshots, setSnapshots] = useState<SnapshotRecord[]>([]);
 	const [loading, setLoading] = useState(true);
+	const [error, setError] = useState<string | null>(null);
 	const [page, setPage] = useState(1);
 	const [hasMore, setHasMore] = useState(false);
 
@@ -37,6 +38,7 @@ export default function SnapshotsList() {
 		(p: number) => {
 			if (!release?.s3_application) return;
 			setLoading(true);
+			setError(null);
 			listSnapshots(release.s3_application, PAGE_SIZE + 1, (p - 1) * PAGE_SIZE)
 				.then((data) => {
 					const rows = data ?? [];
@@ -48,7 +50,11 @@ export default function SnapshotsList() {
 						setSnapshots(rows);
 					}
 				})
-				.catch(console.error)
+				.catch((err) => {
+					setError(
+						err instanceof Error ? err.message : "Failed to load snapshots",
+					);
+				})
 				.finally(() => setLoading(false));
 		},
 		[release?.s3_application],
@@ -92,6 +98,13 @@ export default function SnapshotsList() {
 					<div style={{ textAlign: "center" }}>
 						<Spinner />
 					</div>
+				) : error ? (
+					<EmptyState>
+						<Title headingLevel="h2" size="lg">
+							Error loading snapshots
+						</Title>
+						<EmptyStateBody>{error}</EmptyStateBody>
+					</EmptyState>
 				) : snapshots.length === 0 ? (
 					<EmptyState>
 						<Title headingLevel="h2" size="lg">

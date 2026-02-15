@@ -21,6 +21,7 @@ import {
 import { lazy, Suspense, useEffect, useState } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import "@patternfly/react-core/dist/styles/base.css";
+import ErrorBoundary from "./components/ErrorBoundary";
 import "./theme.css";
 
 const ReleasesOverview = lazy(() => import("./pages/ReleasesOverview"));
@@ -125,22 +126,24 @@ export default function App() {
 	return (
 		<BrowserRouter>
 			<AppLayout>
-				<Suspense
-					fallback={
-						<Bullseye>
-							<Spinner />
-						</Bullseye>
-					}
-				>
-					<Routes>
-						<Route path="/" element={<ReleasesOverview />} />
-						<Route path="/releases/:version" element={<ReleaseDetail />} />
-						<Route
-							path="/releases/:version/snapshots"
-							element={<SnapshotsList />}
-						/>
-					</Routes>
-				</Suspense>
+				<ErrorBoundary>
+					<Suspense
+						fallback={
+							<Bullseye>
+								<Spinner />
+							</Bullseye>
+						}
+					>
+						<Routes>
+							<Route path="/" element={<ReleasesOverview />} />
+							<Route path="/releases/:version" element={<ReleaseDetail />} />
+							<Route
+								path="/releases/:version/snapshots"
+								element={<SnapshotsList />}
+							/>
+						</Routes>
+					</Suspense>
+				</ErrorBoundary>
 			</AppLayout>
 		</BrowserRouter>
 	);

@@ -359,17 +359,13 @@ function ReleaseCard({
 							<Flex justifyContent={{ default: "justifyContentSpaceBetween" }}>
 								{targetDate && (
 									<FlexItem>
-										<span style={{ fontWeight: 600, fontSize: "0.85rem" }}>
-											Target Date
-										</span>
+										<span className="rr-label">Target Date</span>
 										<div>{targetDate.toLocaleDateString()}</div>
 									</FlexItem>
 								)}
 								{release.release_ticket_key && (
 									<FlexItem>
-										<span style={{ fontWeight: 600, fontSize: "0.85rem" }}>
-											Ticket
-										</span>
+										<span className="rr-label">Ticket</span>
 										<div>
 											{ticketLink ? (
 												<a
@@ -387,9 +383,7 @@ function ReleaseCard({
 								)}
 								{snapshot && (
 									<FlexItem>
-										<span style={{ fontWeight: 600, fontSize: "0.85rem" }}>
-											Tests
-										</span>
+										<span className="rr-label">Tests</span>
 										<div>
 											{snapshot.tests_passed ? (
 												<Label
@@ -413,9 +407,7 @@ function ReleaseCard({
 								)}
 								{issueSummary && issueSummary.cves > 0 && (
 									<FlexItem>
-										<span style={{ fontWeight: 600, fontSize: "0.85rem" }}>
-											CVEs
-										</span>
+										<span className="rr-label">CVEs</span>
 										<div>{issueSummary.cves}</div>
 									</FlexItem>
 								)}
