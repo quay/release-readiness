@@ -25,17 +25,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "healthy"})
 }
 
-// --- Components ---
-
-func (s *Server) handleListComponents(w http.ResponseWriter, r *http.Request) {
-	components, err := s.db.ListComponents(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, components)
-}
-
 // --- Snapshots ---
 
 func (s *Server) handleListSnapshots(w http.ResponseWriter, r *http.Request) {
@@ -53,40 +42,7 @@ func (s *Server) handleListSnapshots(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, snapshots)
 }
 
-func (s *Server) handleGetSnapshot(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	snap, err := s.db.GetSnapshotByName(r.Context(), name)
-	if err != nil {
-		writeError(w, http.StatusNotFound, fmt.Errorf("snapshot not found"))
-		return
-	}
-	writeJSON(w, http.StatusOK, snap)
-}
-
-// --- Applications ---
-
-func (s *Server) handleListApplications(w http.ResponseWriter, r *http.Request) {
-	summaries, err := s.db.LatestSnapshotPerApplication(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, summaries)
-}
-
 // --- Releases (version-centric) ---
-
-func (s *Server) handleListReleases(w http.ResponseWriter, r *http.Request) {
-	releases, err := s.db.ListAllReleaseVersions(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if releases == nil {
-		releases = []model.ReleaseVersion{}
-	}
-	writeJSON(w, http.StatusOK, releases)
-}
 
 func (s *Server) handleGetRelease(w http.ResponseWriter, r *http.Request) {
 	version := r.PathValue("version")

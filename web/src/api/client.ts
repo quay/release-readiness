@@ -1,5 +1,4 @@
 import type {
-	ApplicationSummary,
 	DashboardConfig,
 	IssueSummary,
 	JiraIssue,
@@ -23,10 +22,6 @@ export function getConfig(): Promise<DashboardConfig> {
 	return fetchJSON(`${BASE}/config`);
 }
 
-export function listApplications(): Promise<ApplicationSummary[]> {
-	return fetchJSON(`${BASE}/applications`);
-}
-
 export function listSnapshots(
 	application?: string,
 	limit = 50,
@@ -39,15 +34,7 @@ export function listSnapshots(
 	return fetchJSON(`${BASE}/snapshots?${params}`);
 }
 
-export function getSnapshot(name: string): Promise<SnapshotRecord> {
-	return fetchJSON(`${BASE}/snapshots/${encodeURIComponent(name)}`);
-}
-
 // --- Release-centric API ---
-
-export function listReleases(): Promise<ReleaseVersion[]> {
-	return fetchJSON(`${BASE}/releases`);
-}
 
 export function listReleasesOverview(): Promise<ReleaseOverview[]> {
 	return fetchJSON(`${BASE}/releases/overview`);

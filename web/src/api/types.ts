@@ -36,12 +36,6 @@ export interface SnapshotRecord {
 	test_results?: SnapshotTestResult[];
 }
 
-export interface ApplicationSummary {
-	application: string;
-	latest_snapshot?: SnapshotRecord;
-	snapshot_count: number;
-}
-
 export interface JiraIssue {
 	key: string;
 	summary: string;
