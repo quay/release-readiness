@@ -1,4 +1,5 @@
 import {
+	Bullseye,
 	Button,
 	Content,
 	Masthead,
@@ -7,18 +8,17 @@ import {
 	MastheadMain,
 	Page,
 	Popover,
+	Spinner,
 	Toolbar,
 	ToolbarContent,
 	ToolbarItem,
-	Bullseye,
-	Spinner,
 } from "@patternfly/react-core";
 import {
 	MoonIcon,
 	OutlinedQuestionCircleIcon,
 	SunIcon,
 } from "@patternfly/react-icons";
-import { Suspense, lazy, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import "@patternfly/react-core/dist/styles/base.css";
 import "./theme.css";
@@ -125,7 +125,13 @@ export default function App() {
 	return (
 		<BrowserRouter>
 			<AppLayout>
-				<Suspense fallback={<Bullseye><Spinner /></Bullseye>}>
+				<Suspense
+					fallback={
+						<Bullseye>
+							<Spinner />
+						</Bullseye>
+					}
+				>
 					<Routes>
 						<Route path="/" element={<ReleasesOverview />} />
 						<Route path="/releases/:version" element={<ReleaseDetail />} />
