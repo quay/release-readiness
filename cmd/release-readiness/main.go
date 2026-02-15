@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/signal"
 	"path"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -88,10 +87,11 @@ func main() {
 		})
 		jiraLog := logger.With("component", "jira-sync")
 		logger.Info("jira sync enabled", "url", *jiraURL, "project", *jiraProject, "interval", *jiraPollInterval)
+		syncer := jira.NewSyncer(jiraClient, database, jiraLog)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runJiraSyncLoop(ctx, database, jiraClient, *jiraPollInterval, jiraLog)
+			syncer.Run(ctx, *jiraPollInterval)
 		}()
 	}
 
@@ -244,161 +244,3 @@ func ingestSnapshot(ctx context.Context, database *db.DB, s3c *s3client.Client, 
 	return nil
 }
 
-// --- JIRA Sync ---
-
-func runJiraSyncLoop(ctx context.Context, database *db.DB, jiraClient *jira.Client, interval time.Duration, logger *slog.Logger) {
-	syncJiraOnce(ctx, database, jiraClient, logger)
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			logger.Info("stopping")
-			return
-		case <-ticker.C:
-			syncJiraOnce(ctx, database, jiraClient, logger)
-		}
-	}
-}
-
-func syncJiraOnce(ctx context.Context, database *db.DB, jiraClient *jira.Client, logger *slog.Logger) {
-	// Discover active releases from JIRA using the -area/release component
-	releases, err := jiraClient.DiscoverActiveReleases(ctx)
-	if err != nil {
-		logger.Error("discover releases", "error", err)
-		return
-	}
-
-	logger.Info("discovered active releases", "count", len(releases))
-
-	// Track which versions were actively synced this cycle
-	activeSet := make(map[string]bool, len(releases))
-
-	// Process each discovered release sequentially to avoid rate limiting
-	for _, rel := range releases {
-		activeSet[rel.FixVersion] = true
-
-		// Store the discovered release version
-		rv := &model.ReleaseVersion{
-			Name:                  rel.FixVersion,
-			ReleaseTicketKey:      rel.ReleaseTicketKey,
-			ReleaseTicketAssignee: rel.Assignee,
-			S3Application:         rel.S3Application,
-			DueDate:               rel.DueDate,
-		}
-
-		// Try to get version metadata from JIRA (release date, description, etc.)
-		versionInfo, err := jiraClient.GetVersion(ctx, rel.FixVersion)
-		if err != nil {
-			logger.Warn("get version metadata", "version", rel.FixVersion, "error", err)
-		} else {
-			rv.Description = versionInfo.Description
-			rv.Released = versionInfo.Released
-			rv.Archived = versionInfo.Archived
-			if versionInfo.ReleaseDate != "" {
-				t, err := time.Parse("2006-01-02", versionInfo.ReleaseDate)
-				if err == nil {
-					rv.ReleaseDate = &t
-				}
-			}
-		}
-
-		if err := database.UpsertReleaseVersion(ctx, rv); err != nil {
-			logger.Error("upsert version", "version", rel.FixVersion, "error", err)
-		}
-
-		// Sync issues for this fixVersion
-		syncJiraVersion(ctx, database, jiraClient, rel.FixVersion, logger)
-	}
-
-	// Reconcile unreleased versions in DB that may have been released in
-	// JIRA after their tracking ticket was closed (and thus dropped from
-	// DiscoverActiveReleases).
-	dbVersions, err := database.ListActiveReleaseVersions(ctx)
-	if err != nil {
-		logger.Error("list active db versions", "error", err)
-	} else {
-		for _, dbv := range dbVersions {
-			if activeSet[dbv.Name] {
-				continue // already synced this cycle
-			}
-			versionInfo, err := jiraClient.GetVersion(ctx, dbv.Name)
-			if err != nil {
-				continue // version may not exist in JIRA
-			}
-			if versionInfo.Released || versionInfo.Archived {
-				dbv.Released = versionInfo.Released
-				dbv.Archived = versionInfo.Archived
-				if versionInfo.ReleaseDate != "" {
-					t, err := time.Parse("2006-01-02", versionInfo.ReleaseDate)
-					if err == nil {
-						dbv.ReleaseDate = &t
-					}
-				}
-				if err := database.UpsertReleaseVersion(ctx, &dbv); err != nil {
-					logger.Error("upsert version", "version", dbv.Name, "error", err)
-				}
-				syncJiraVersion(ctx, database, jiraClient, dbv.Name, logger)
-				logger.Info("reconciled version", "version", dbv.Name, "released", versionInfo.Released)
-			}
-		}
-	}
-}
-
-func syncJiraVersion(ctx context.Context, database *db.DB, jiraClient *jira.Client, fixVersion string, logger *slog.Logger) {
-	issues, err := jiraClient.SearchIssues(ctx, fixVersion)
-	if err != nil {
-		logger.Error("search issues", "version", fixVersion, "error", err)
-		return
-	}
-
-	var keys []string
-	for _, issue := range issues {
-		keys = append(keys, issue.Key)
-
-		labels := strings.Join(issue.Fields.Labels, ",")
-		assignee := ""
-		if issue.Fields.Assignee != nil {
-			assignee = issue.Fields.Assignee.DisplayName
-		}
-		resolution := ""
-		if issue.Fields.Resolution != nil {
-			resolution = issue.Fields.Resolution.Name
-		}
-
-		updatedAt, _ := time.Parse("2006-01-02T15:04:05.000-0700", issue.Fields.Updated)
-		if updatedAt.IsZero() {
-			updatedAt = time.Now().UTC()
-		}
-
-		jiraURL := ""
-		if jiraClient != nil {
-			jiraURL = fmt.Sprintf("%s/browse/%s", strings.TrimRight(jiraClient.BaseURL(), "/"), issue.Key)
-		}
-
-		record := &model.JiraIssueRecord{
-			Key:        issue.Key,
-			Summary:    issue.Fields.Summary,
-			Status:     issue.Fields.Status.Name,
-			Priority:   issue.Fields.Priority.Name,
-			Labels:     labels,
-			FixVersion: fixVersion,
-			Assignee:   assignee,
-			IssueType:  issue.Fields.IssueType.Name,
-			Resolution: resolution,
-			Link:       jiraURL,
-			UpdatedAt:  updatedAt,
-		}
-
-		if err := database.UpsertJiraIssue(ctx, record); err != nil {
-			logger.Error("upsert issue", "key", issue.Key, "error", err)
-		}
-	}
-
-	// Remove issues no longer in this fixVersion
-	if err := database.DeleteJiraIssuesNotIn(ctx, fixVersion, keys); err != nil {
-		logger.Error("cleanup issues", "version", fixVersion, "error", err)
-	}
-
-	logger.Info("synced issues", "count", len(issues), "version", fixVersion)
-}

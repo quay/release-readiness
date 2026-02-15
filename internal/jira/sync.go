@@ -1,0 +1,181 @@
+package jira
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	"github.com/quay/release-readiness/internal/model"
+)
+
+// Store is the subset of the database layer needed by the JIRA syncer.
+type Store interface {
+	UpsertReleaseVersion(ctx context.Context, v *model.ReleaseVersion) error
+	UpsertJiraIssue(ctx context.Context, issue *model.JiraIssueRecord) error
+	DeleteJiraIssuesNotIn(ctx context.Context, fixVersion string, keys []string) error
+	ListActiveReleaseVersions(ctx context.Context) ([]model.ReleaseVersion, error)
+}
+
+// Syncer orchestrates periodic JIRA synchronisation into a Store.
+type Syncer struct {
+	client *Client
+	store  Store
+	logger *slog.Logger
+}
+
+// NewSyncer creates a Syncer that uses client to fetch data and store to persist it.
+func NewSyncer(client *Client, store Store, logger *slog.Logger) *Syncer {
+	return &Syncer{client: client, store: store, logger: logger}
+}
+
+// Run performs an immediate sync and then repeats every interval until ctx is cancelled.
+func (s *Syncer) Run(ctx context.Context, interval time.Duration) {
+	s.SyncOnce(ctx)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			s.logger.Info("stopping")
+			return
+		case <-ticker.C:
+			s.SyncOnce(ctx)
+		}
+	}
+}
+
+// SyncOnce discovers active releases and syncs their issues.
+func (s *Syncer) SyncOnce(ctx context.Context) {
+	releases, err := s.client.DiscoverActiveReleases(ctx)
+	if err != nil {
+		s.logger.Error("discover releases", "error", err)
+		return
+	}
+
+	s.logger.Info("discovered active releases", "count", len(releases))
+
+	activeSet := make(map[string]bool, len(releases))
+
+	for _, rel := range releases {
+		activeSet[rel.FixVersion] = true
+
+		rv := &model.ReleaseVersion{
+			Name:                  rel.FixVersion,
+			ReleaseTicketKey:      rel.ReleaseTicketKey,
+			ReleaseTicketAssignee: rel.Assignee,
+			S3Application:         rel.S3Application,
+			DueDate:               rel.DueDate,
+		}
+
+		versionInfo, err := s.client.GetVersion(ctx, rel.FixVersion)
+		if err != nil {
+			s.logger.Warn("get version metadata", "version", rel.FixVersion, "error", err)
+		} else {
+			rv.Description = versionInfo.Description
+			rv.Released = versionInfo.Released
+			rv.Archived = versionInfo.Archived
+			if versionInfo.ReleaseDate != "" {
+				t, err := time.Parse("2006-01-02", versionInfo.ReleaseDate)
+				if err == nil {
+					rv.ReleaseDate = &t
+				}
+			}
+		}
+
+		if err := s.store.UpsertReleaseVersion(ctx, rv); err != nil {
+			s.logger.Error("upsert version", "version", rel.FixVersion, "error", err)
+		}
+
+		s.syncVersion(ctx, rel.FixVersion)
+	}
+
+	// Reconcile unreleased versions in DB that may have been released in
+	// JIRA after their tracking ticket was closed (and thus dropped from
+	// DiscoverActiveReleases).
+	dbVersions, err := s.store.ListActiveReleaseVersions(ctx)
+	if err != nil {
+		s.logger.Error("list active db versions", "error", err)
+	} else {
+		for _, dbv := range dbVersions {
+			if activeSet[dbv.Name] {
+				continue
+			}
+			versionInfo, err := s.client.GetVersion(ctx, dbv.Name)
+			if err != nil {
+				continue
+			}
+			if versionInfo.Released || versionInfo.Archived {
+				dbv.Released = versionInfo.Released
+				dbv.Archived = versionInfo.Archived
+				if versionInfo.ReleaseDate != "" {
+					t, err := time.Parse("2006-01-02", versionInfo.ReleaseDate)
+					if err == nil {
+						dbv.ReleaseDate = &t
+					}
+				}
+				if err := s.store.UpsertReleaseVersion(ctx, &dbv); err != nil {
+					s.logger.Error("upsert version", "version", dbv.Name, "error", err)
+				}
+				s.syncVersion(ctx, dbv.Name)
+				s.logger.Info("reconciled version", "version", dbv.Name, "released", versionInfo.Released)
+			}
+		}
+	}
+}
+
+// syncVersion fetches all issues for a single fixVersion and upserts them.
+func (s *Syncer) syncVersion(ctx context.Context, fixVersion string) {
+	issues, err := s.client.SearchIssues(ctx, fixVersion)
+	if err != nil {
+		s.logger.Error("search issues", "version", fixVersion, "error", err)
+		return
+	}
+
+	var keys []string
+	for _, issue := range issues {
+		keys = append(keys, issue.Key)
+
+		labels := strings.Join(issue.Fields.Labels, ",")
+		assignee := ""
+		if issue.Fields.Assignee != nil {
+			assignee = issue.Fields.Assignee.DisplayName
+		}
+		resolution := ""
+		if issue.Fields.Resolution != nil {
+			resolution = issue.Fields.Resolution.Name
+		}
+
+		updatedAt, _ := time.Parse("2006-01-02T15:04:05.000-0700", issue.Fields.Updated)
+		if updatedAt.IsZero() {
+			updatedAt = time.Now().UTC()
+		}
+
+		jiraURL := fmt.Sprintf("%s/browse/%s", s.client.BaseURL(), issue.Key)
+
+		record := &model.JiraIssueRecord{
+			Key:        issue.Key,
+			Summary:    issue.Fields.Summary,
+			Status:     issue.Fields.Status.Name,
+			Priority:   issue.Fields.Priority.Name,
+			Labels:     labels,
+			FixVersion: fixVersion,
+			Assignee:   assignee,
+			IssueType:  issue.Fields.IssueType.Name,
+			Resolution: resolution,
+			Link:       jiraURL,
+			UpdatedAt:  updatedAt,
+		}
+
+		if err := s.store.UpsertJiraIssue(ctx, record); err != nil {
+			s.logger.Error("upsert issue", "key", issue.Key, "error", err)
+		}
+	}
+
+	if err := s.store.DeleteJiraIssuesNotIn(ctx, fixVersion, keys); err != nil {
+		s.logger.Error("cleanup issues", "version", fixVersion, "error", err)
+	}
+
+	s.logger.Info("synced issues", "count", len(issues), "version", fixVersion)
+}
