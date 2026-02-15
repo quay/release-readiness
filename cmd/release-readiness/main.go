@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path"
 	"strings"
 	"sync"
 	"syscall"
@@ -160,14 +161,36 @@ func syncS3Once(ctx context.Context, database *db.DB, s3c *s3client.Client, logg
 
 			logger.Info("new snapshot", "snapshot", snap.Snapshot, "application", app)
 
-			if err := ingestSnapshot(ctx, database, snap); err != nil {
+			if err := ingestSnapshot(ctx, database, s3c, key, snap, logger); err != nil {
 				logger.Error("ingest snapshot", "snapshot", snap.Snapshot, "error", err)
 			}
 		}
 	}
 }
 
-func ingestSnapshot(ctx context.Context, database *db.DB, snap *model.Snapshot) error {
+func ingestSnapshot(ctx context.Context, database *db.DB, s3c *s3client.Client, key string, snap *model.Snapshot, logger *slog.Logger) error {
+	// Derive the snapshot directory prefix from the key.
+	// key is like "{app}/snapshots/{snapshot-name}/snapshot.json"
+	// We need "{app}/snapshots/{snapshot-name}/" as the base for JUnit paths.
+	snapshotDir := path.Dir(key) + "/"
+
+	// Fetch JUnit data for each test result before writing to DB.
+	for i, tr := range snap.TestResults {
+		junitPrefix := snapshotDir + "junit/" + tr.Scenario + "/"
+		result, err := s3c.GetTestResults(ctx, junitPrefix)
+		if err != nil {
+			logger.Debug("no junit data", "scenario", tr.Scenario, "path", junitPrefix)
+			continue
+		}
+		snap.TestResults[i].Summary = &model.TestSummary{
+			Total:       result.Total,
+			Passed:      result.Passed,
+			Failed:      result.Failed,
+			Skipped:     result.Skipped,
+			DurationSec: result.DurationSec,
+		}
+	}
+
 	snapshotRecord, err := database.CreateSnapshot(
 		ctx,
 		snap.Application,

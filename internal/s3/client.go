@@ -14,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/quay/release-readiness/internal/junit"
+	"github.com/quay/release-readiness/internal/konflux"
 	"github.com/quay/release-readiness/internal/model"
 )
 
@@ -78,17 +79,15 @@ func (c *Client) ListApplications(ctx context.Context) ([]string, error) {
 	return apps, nil
 }
 
-// GetLatestSnapshot fetches {application}/latest.json and decodes it.
-func (c *Client) GetLatestSnapshot(ctx context.Context, application string) (*model.Snapshot, error) {
-	return c.getSnapshot(ctx, application+"/latest.json")
-}
-
-// ListSnapshots lists all .json keys under {application}/snapshots/.
+// ListSnapshots lists snapshot subdirectory names under {application}/snapshots/
+// and returns the S3 key for each snapshot.json file.
 func (c *Client) ListSnapshots(ctx context.Context, application string) ([]string, error) {
 	prefix := application + "/snapshots/"
+	delimiter := "/"
 	paginator := s3.NewListObjectsV2Paginator(c.s3, &s3.ListObjectsV2Input{
-		Bucket: &c.bucket,
-		Prefix: &prefix,
+		Bucket:    &c.bucket,
+		Prefix:    &prefix,
+		Delimiter: &delimiter,
 	})
 
 	var keys []string
@@ -97,18 +96,28 @@ func (c *Client) ListSnapshots(ctx context.Context, application string) ([]strin
 		if err != nil {
 			return nil, fmt.Errorf("list snapshots: %w", err)
 		}
-		for _, obj := range page.Contents {
-			if strings.HasSuffix(*obj.Key, ".json") {
-				keys = append(keys, *obj.Key)
-			}
+		for _, p := range page.CommonPrefixes {
+			// Each prefix is {app}/snapshots/{snapshot-name}/
+			// The snapshot.json is at {app}/snapshots/{snapshot-name}/snapshot.json
+			keys = append(keys, *p.Prefix+"snapshot.json")
 		}
 	}
 	return keys, nil
 }
 
-// GetSnapshot fetches a specific snapshot JSON by its full S3 key.
+// GetSnapshot fetches a raw Snapshot CR JSON by its full S3 key,
+// parses it as a Konflux SnapshotCR, and converts to model.Snapshot.
 func (c *Client) GetSnapshot(ctx context.Context, key string) (*model.Snapshot, error) {
-	return c.getSnapshot(ctx, key)
+	data, err := c.getObject(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	var cr konflux.SnapshotCR
+	if err := json.Unmarshal(data, &cr); err != nil {
+		return nil, fmt.Errorf("decode snapshot CR %s: %w", key, err)
+	}
+	snap := konflux.Convert(cr)
+	return &snap, nil
 }
 
 // GetTestResults fetches all JUnit XML files under the given prefix,
@@ -152,18 +161,6 @@ func (c *Client) GetTestResults(ctx context.Context, junitPath string) (*junit.R
 		return nil, fmt.Errorf("no junit xml files found under %s", junitPath)
 	}
 	return junit.MergeResults(results...), nil
-}
-
-func (c *Client) getSnapshot(ctx context.Context, key string) (*model.Snapshot, error) {
-	data, err := c.getObject(ctx, key)
-	if err != nil {
-		return nil, err
-	}
-	var snap model.Snapshot
-	if err := json.Unmarshal(data, &snap); err != nil {
-		return nil, fmt.Errorf("decode snapshot %s: %w", key, err)
-	}
-	return &snap, nil
 }
 
 func (c *Client) getObject(ctx context.Context, key string) ([]byte, error) {
