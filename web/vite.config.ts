@@ -6,6 +6,18 @@ export default defineConfig({
 	build: {
 		outDir: "dist",
 		emptyOutDir: true,
+		rollupOptions: {
+			output: {
+				manualChunks: {
+					react: ["react", "react-dom", "react-router-dom"],
+					patternfly: [
+						"@patternfly/react-core",
+						"@patternfly/react-table",
+						"@patternfly/react-icons",
+					],
+				},
+			},
+		},
 	},
 	server: {
 		allowedHosts: ["workstation"],
