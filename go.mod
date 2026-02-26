@@ -9,7 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.10
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.10
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.1
-	modernc.org/sqlite v1.45.0
+	modernc.org/sqlite v1.46.1
 )
 
 require (
