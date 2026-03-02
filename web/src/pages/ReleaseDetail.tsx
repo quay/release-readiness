@@ -393,8 +393,8 @@ function ReleaseSignal({
 	const qeSignOff = allTestsPassed && (bugsVerified || issueSummary === null);
 
 	const progressItems = [
-		{ label: "Builds ready", done: buildsReady },
-		{ label: "Tests passed", done: allTestsPassed },
+		{ label: "Builds ready", done: buildsReady, warning: snapshot === null },
+		{ label: "Tests passed", done: allTestsPassed, warning: !hasTests },
 		...(issueSummary ? [{ label: "Bugs verified", done: bugsVerified }] : []),
 		{ label: "QE sign off", done: qeSignOff },
 	];
@@ -452,11 +452,17 @@ function ReleaseSignal({
 						</FlexItem>
 					)}
 				</Flex>
-				<ProgressStepper isCenterAligned style={{ marginTop: "1rem" }}>
+				<ProgressStepper isCenterAligned style={{ marginTop: "1.5rem" }}>
 					{progressItems.map((item, idx) => (
 						<ProgressStep
 							key={item.label}
-							variant={item.done ? "success" : "pending"}
+							variant={
+								item.done
+									? "success"
+									: item.warning
+										? "warning"
+										: "pending"
+							}
 							isCurrent={idx === firstIncomplete}
 							id={`step-${idx}`}
 							titleId={`step-${idx}-title`}
