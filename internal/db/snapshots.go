@@ -8,32 +8,22 @@ import (
 	"github.com/quay/release-readiness/internal/model"
 )
 
-func (d *DB) CreateSnapshot(ctx context.Context, application, name, triggerComponent, triggerGitSHA, triggerPipelineRun string, testsPassed, released bool, releaseBlockedReason string, createdAt time.Time) (*model.SnapshotRecord, error) {
+func (d *DB) CreateSnapshot(ctx context.Context, application, name string, testsPassed bool, createdAt time.Time) (*model.SnapshotRecord, error) {
 	id, err := d.queries().CreateSnapshot(ctx, dbsqlc.CreateSnapshotParams{
-		Application:          application,
-		Name:                 name,
-		TriggerComponent:     triggerComponent,
-		TriggerGitSha:        triggerGitSHA,
-		TriggerPipelineRun:   triggerPipelineRun,
-		TestsPassed:          boolToInt64(testsPassed),
-		Released:             boolToInt64(released),
-		ReleaseBlockedReason: releaseBlockedReason,
-		CreatedAt:            createdAt.UTC().Format(time.RFC3339),
+		Application: application,
+		Name:        name,
+		TestsPassed: boolToInt64(testsPassed),
+		CreatedAt:   createdAt.UTC().Format(time.RFC3339),
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &model.SnapshotRecord{
-		ID:                   id,
-		Application:          application,
-		Name:                 name,
-		TriggerComponent:     triggerComponent,
-		TriggerGitSHA:        triggerGitSHA,
-		TriggerPipelineRun:   triggerPipelineRun,
-		TestsPassed:          testsPassed,
-		Released:             released,
-		ReleaseBlockedReason: releaseBlockedReason,
-		CreatedAt:            createdAt.UTC(),
+		ID:          id,
+		Application: application,
+		Name:        name,
+		TestsPassed: testsPassed,
+		CreatedAt:   createdAt.UTC(),
 	}, nil
 }
 
@@ -58,12 +48,19 @@ func (d *DB) GetSnapshotByName(ctx context.Context, name string) (*model.Snapsho
 	}
 	s.Components = components
 
-	results, err := d.ListSnapshotTestResults(ctx, s.ID)
+	suites, err := d.ListTestSuites(ctx, s.ID)
 	if err != nil {
 		return nil, err
 	}
-	s.TestResults = results
-	s.HasTests = len(results) > 0
+	for i, suite := range suites {
+		cases, err := d.ListTestCases(ctx, suite.ID)
+		if err != nil {
+			return nil, err
+		}
+		suites[i].TestCases = cases
+	}
+	s.TestSuites = suites
+	s.HasTests = len(suites) > 0
 
 	return &s, nil
 }
@@ -130,17 +127,12 @@ func (d *DB) LatestSnapshotPerApplication(ctx context.Context) ([]model.Applicat
 	summaries := make([]model.ApplicationSummary, len(rows))
 	for i, r := range rows {
 		s := model.SnapshotRecord{
-			ID:                   r.ID,
-			Application:          r.Application,
-			Name:                 r.Name,
-			TriggerComponent:     r.TriggerComponent,
-			TriggerGitSHA:        r.TriggerGitSha,
-			TriggerPipelineRun:   r.TriggerPipelineRun,
-			TestsPassed:          r.TestsPassed == 1,
-			HasTests:             r.TestCount > 0,
-			Released:             r.Released == 1,
-			ReleaseBlockedReason: r.ReleaseBlockedReason,
-			CreatedAt:            parseTime(r.CreatedAt),
+			ID:          r.ID,
+			Application: r.Application,
+			Name:        r.Name,
+			TestsPassed: r.TestsPassed == 1,
+			HasTests:    r.TestCount > 0,
+			CreatedAt:   parseTime(r.CreatedAt),
 		}
 		summaries[i] = model.ApplicationSummary{
 			Application:    r.Application,
@@ -151,55 +143,103 @@ func (d *DB) LatestSnapshotPerApplication(ctx context.Context) ([]model.Applicat
 	return summaries, nil
 }
 
-func (d *DB) CreateSnapshotTestResult(ctx context.Context, snapshotID int64, scenario, status, pipelineRun string, total, passed, failed, skipped int, durationSec float64) error {
-	return d.queries().CreateSnapshotTestResult(ctx, dbsqlc.CreateSnapshotTestResultParams{
+func (d *DB) CreateTestSuite(ctx context.Context, snapshotID int64, name, status, pipelineRun, toolName, toolVersion string, tests, passed, failed, skipped, pending, other, flaky int, startTime, stopTime, durationMs int64) (int64, error) {
+	return d.queries().CreateTestSuite(ctx, dbsqlc.CreateTestSuiteParams{
 		SnapshotID:  snapshotID,
-		Scenario:    scenario,
+		Name:        name,
 		Status:      status,
 		PipelineRun: pipelineRun,
-		Total:       int64(total),
+		ToolName:    toolName,
+		ToolVersion: toolVersion,
+		Tests:       int64(tests),
 		Passed:      int64(passed),
 		Failed:      int64(failed),
 		Skipped:     int64(skipped),
-		DurationSec: durationSec,
+		Pending:     int64(pending),
+		Other:       int64(other),
+		Flaky:       int64(flaky),
+		StartTime:   startTime,
+		StopTime:    stopTime,
+		DurationMs:  durationMs,
 	})
 }
 
-func (d *DB) ListSnapshotTestResults(ctx context.Context, snapshotID int64) ([]model.SnapshotTestResult, error) {
-	rows, err := d.queries().ListSnapshotTestResults(ctx, snapshotID)
+func (d *DB) CreateTestCase(ctx context.Context, testSuiteID int64, name, status string, durationMs float64, message, trace, filePath, suite string, retries int, flaky bool) error {
+	return d.queries().CreateTestCase(ctx, dbsqlc.CreateTestCaseParams{
+		TestSuiteID: testSuiteID,
+		Name:        name,
+		Status:      status,
+		DurationMs:  durationMs,
+		Message:     message,
+		Trace:       trace,
+		FilePath:    filePath,
+		Suite:       suite,
+		Retries:     int64(retries),
+		Flaky:       boolToInt64(flaky),
+	})
+}
+
+func (d *DB) ListTestSuites(ctx context.Context, snapshotID int64) ([]model.TestSuite, error) {
+	rows, err := d.queries().ListTestSuitesBySnapshot(ctx, snapshotID)
 	if err != nil {
 		return nil, err
 	}
-	results := make([]model.SnapshotTestResult, len(rows))
+	suites := make([]model.TestSuite, len(rows))
 	for i, r := range rows {
-		results[i] = model.SnapshotTestResult{
+		suites[i] = model.TestSuite{
 			ID:          r.ID,
 			SnapshotID:  r.SnapshotID,
-			Scenario:    r.Scenario,
+			Name:        r.Name,
 			Status:      r.Status,
 			PipelineRun: r.PipelineRun,
-			Total:       int(r.Total),
+			ToolName:    r.ToolName,
+			ToolVersion: r.ToolVersion,
+			Tests:       int(r.Tests),
 			Passed:      int(r.Passed),
 			Failed:      int(r.Failed),
 			Skipped:     int(r.Skipped),
-			DurationSec: r.DurationSec,
+			Pending:     int(r.Pending),
+			Other:       int(r.Other),
+			Flaky:       int(r.Flaky),
+			StartTime:   r.StartTime,
+			StopTime:    r.StopTime,
+			DurationMs:  r.DurationMs,
 			CreatedAt:   parseTime(r.CreatedAt),
 		}
 	}
-	return results, nil
+	return suites, nil
+}
+
+func (d *DB) ListTestCases(ctx context.Context, testSuiteID int64) ([]model.TestCase, error) {
+	rows, err := d.queries().ListTestCasesBySuite(ctx, testSuiteID)
+	if err != nil {
+		return nil, err
+	}
+	cases := make([]model.TestCase, len(rows))
+	for i, r := range rows {
+		cases[i] = model.TestCase{
+			ID:          r.ID,
+			TestSuiteID: r.TestSuiteID,
+			Name:        r.Name,
+			Status:      r.Status,
+			DurationMs:  r.DurationMs,
+			Message:     r.Message,
+			Trace:       r.Trace,
+			FilePath:    r.FilePath,
+			Suite:       r.Suite,
+			Retries:     int(r.Retries),
+			Flaky:       r.Flaky == 1,
+		}
+	}
+	return cases, nil
 }
 
 func toSnapshotRecord(r dbsqlc.Snapshot) model.SnapshotRecord {
 	return model.SnapshotRecord{
-		ID:                   r.ID,
-		Application:          r.Application,
-		Name:                 r.Name,
-		TriggerComponent:     r.TriggerComponent,
-		TriggerGitSHA:        r.TriggerGitSha,
-		TriggerPipelineRun:   r.TriggerPipelineRun,
-		TestsPassed:          r.TestsPassed == 1,
-		Released:             r.Released == 1,
-		ReleaseBlockedReason: r.ReleaseBlockedReason,
-		CreatedAt:            parseTime(r.CreatedAt),
+		ID:          r.ID,
+		Application: r.Application,
+		Name:        r.Name,
+		TestsPassed: r.TestsPassed == 1,
+		CreatedAt:   parseTime(r.CreatedAt),
 	}
 }

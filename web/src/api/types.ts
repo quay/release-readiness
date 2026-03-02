@@ -7,34 +7,51 @@ export interface ComponentRecord {
 	git_url: string;
 }
 
-export interface SnapshotTestResult {
+export interface TestCase {
+	id: number;
+	test_suite_id: number;
+	name: string;
+	status: string;
+	duration_ms: number;
+	message?: string;
+	trace?: string;
+	file_path?: string;
+	suite?: string;
+	retries: number;
+	flaky: boolean;
+}
+
+export interface TestSuite {
 	id: number;
 	snapshot_id: number;
-	scenario: string;
+	name: string;
 	status: string;
 	pipeline_run: string;
-	total: number;
+	tool_name: string;
+	tool_version: string;
+	tests: number;
 	passed: number;
 	failed: number;
 	skipped: number;
-	duration_sec: number;
+	pending: number;
+	other: number;
+	flaky: number;
+	start_time: number;
+	stop_time: number;
+	duration_ms: number;
 	created_at: string;
+	test_cases?: TestCase[];
 }
 
 export interface SnapshotRecord {
 	id: number;
 	application: string;
 	name: string;
-	trigger_component: string;
-	trigger_git_sha: string;
-	trigger_pipeline_run: string;
 	tests_passed: boolean;
 	has_tests: boolean;
-	released: boolean;
-	release_blocked_reason?: string;
 	created_at: string;
 	components?: ComponentRecord[];
-	test_results?: SnapshotTestResult[];
+	test_suites?: TestSuite[];
 }
 
 export interface JiraIssue {

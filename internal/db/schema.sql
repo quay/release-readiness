@@ -6,36 +6,54 @@ CREATE TABLE IF NOT EXISTS components (
 );
 
 CREATE TABLE IF NOT EXISTS snapshots (
-    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
-    application            TEXT NOT NULL,
-    name                   TEXT NOT NULL UNIQUE,
-    trigger_component      TEXT NOT NULL DEFAULT '',
-    trigger_git_sha        TEXT NOT NULL DEFAULT '',
-    trigger_pipeline_run   TEXT NOT NULL DEFAULT '',
-    tests_passed           INTEGER NOT NULL DEFAULT 0,
-    released               INTEGER NOT NULL DEFAULT 0,
-    release_blocked_reason TEXT NOT NULL DEFAULT '',
-    created_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    application  TEXT NOT NULL,
+    name         TEXT NOT NULL UNIQUE,
+    tests_passed INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_snapshots_application ON snapshots(application);
 CREATE INDEX IF NOT EXISTS idx_snapshots_created ON snapshots(created_at DESC);
 
-CREATE TABLE IF NOT EXISTS snapshot_test_results (
+CREATE TABLE IF NOT EXISTS test_suites (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     snapshot_id     INTEGER NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
-    scenario        TEXT NOT NULL,
+    name            TEXT NOT NULL,
     status          TEXT NOT NULL DEFAULT 'unknown',
     pipeline_run    TEXT NOT NULL DEFAULT '',
-    total           INTEGER NOT NULL DEFAULT 0,
+    tool_name       TEXT NOT NULL DEFAULT '',
+    tool_version    TEXT NOT NULL DEFAULT '',
+    tests           INTEGER NOT NULL DEFAULT 0,
     passed          INTEGER NOT NULL DEFAULT 0,
     failed          INTEGER NOT NULL DEFAULT 0,
     skipped         INTEGER NOT NULL DEFAULT 0,
-    duration_sec    REAL NOT NULL DEFAULT 0.0,
+    pending         INTEGER NOT NULL DEFAULT 0,
+    other           INTEGER NOT NULL DEFAULT 0,
+    flaky           INTEGER NOT NULL DEFAULT 0,
+    start_time      INTEGER NOT NULL DEFAULT 0,
+    stop_time       INTEGER NOT NULL DEFAULT 0,
+    duration_ms     INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_snapshot_test_results_snapshot ON snapshot_test_results(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_test_suites_snapshot ON test_suites(snapshot_id);
+
+CREATE TABLE IF NOT EXISTS test_cases (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    test_suite_id   INTEGER NOT NULL REFERENCES test_suites(id) ON DELETE CASCADE,
+    name            TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'unknown',
+    duration_ms     REAL NOT NULL DEFAULT 0.0,
+    message         TEXT NOT NULL DEFAULT '',
+    trace           TEXT NOT NULL DEFAULT '',
+    file_path       TEXT NOT NULL DEFAULT '',
+    suite           TEXT NOT NULL DEFAULT '',
+    retries         INTEGER NOT NULL DEFAULT 0,
+    flaky           INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_test_cases_suite ON test_cases(test_suite_id);
 
 CREATE TABLE IF NOT EXISTS snapshot_components (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

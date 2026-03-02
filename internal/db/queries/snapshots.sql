@@ -1,13 +1,12 @@
 -- name: CreateSnapshot :execlastid
-INSERT INTO snapshots (application, name, trigger_component, trigger_git_sha, trigger_pipeline_run, tests_passed, released, release_blocked_reason, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO snapshots (application, name, tests_passed, created_at)
+VALUES (?, ?, ?, ?);
 
 -- name: SnapshotExistsByName :one
 SELECT COUNT(*) FROM snapshots WHERE name = ?;
 
 -- name: GetSnapshotRow :one
-SELECT id, application, name, trigger_component, trigger_git_sha, trigger_pipeline_run,
-       tests_passed, released, release_blocked_reason, created_at
+SELECT id, application, name, tests_passed, created_at
 FROM snapshots WHERE name = ?;
 
 -- name: CreateSnapshotComponent :exec
@@ -21,22 +20,19 @@ WHERE snapshot_id = ?
 ORDER BY component;
 
 -- name: ListAllSnapshots :many
-SELECT id, application, name, trigger_component, trigger_git_sha, trigger_pipeline_run,
-       tests_passed, released, release_blocked_reason, created_at
+SELECT id, application, name, tests_passed, created_at
 FROM snapshots
 ORDER BY id DESC LIMIT ? OFFSET ?;
 
 -- name: ListSnapshotsByApplication :many
-SELECT id, application, name, trigger_component, trigger_git_sha, trigger_pipeline_run,
-       tests_passed, released, release_blocked_reason, created_at
+SELECT id, application, name, tests_passed, created_at
 FROM snapshots
 WHERE application = ?
 ORDER BY id DESC LIMIT ? OFFSET ?;
 
 -- name: LatestSnapshotPerApplication :many
-SELECT s.id, s.application, s.name, s.trigger_component, s.trigger_git_sha, s.trigger_pipeline_run,
-       s.tests_passed, s.released, s.release_blocked_reason, s.created_at, CAST(counts.cnt AS INTEGER) AS cnt,
-       (SELECT COUNT(*) FROM snapshot_test_results WHERE snapshot_id = s.id) AS test_count
+SELECT s.id, s.application, s.name, s.tests_passed, s.created_at, CAST(counts.cnt AS INTEGER) AS cnt,
+       (SELECT COUNT(*) FROM test_suites WHERE snapshot_id = s.id) AS test_count
 FROM snapshots s
 JOIN (
     SELECT application, MAX(id) AS max_id, COUNT(*) AS cnt
@@ -45,12 +41,22 @@ JOIN (
 ) counts ON s.id = counts.max_id
 ORDER BY s.application;
 
--- name: CreateSnapshotTestResult :exec
-INSERT INTO snapshot_test_results (snapshot_id, scenario, status, pipeline_run, total, passed, failed, skipped, duration_sec)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+-- name: CreateTestSuite :execlastid
+INSERT INTO test_suites (snapshot_id, name, status, pipeline_run, tool_name, tool_version, tests, passed, failed, skipped, pending, other, flaky, start_time, stop_time, duration_ms)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
--- name: ListSnapshotTestResults :many
-SELECT id, snapshot_id, scenario, status, pipeline_run, total, passed, failed, skipped, duration_sec, created_at
-FROM snapshot_test_results
+-- name: CreateTestCase :exec
+INSERT INTO test_cases (test_suite_id, name, status, duration_ms, message, trace, file_path, suite, retries, flaky)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: ListTestSuitesBySnapshot :many
+SELECT id, snapshot_id, name, status, pipeline_run, tool_name, tool_version, tests, passed, failed, skipped, pending, other, flaky, start_time, stop_time, duration_ms, created_at
+FROM test_suites
 WHERE snapshot_id = ?
-ORDER BY scenario;
+ORDER BY name;
+
+-- name: ListTestCasesBySuite :many
+SELECT id, test_suite_id, name, status, duration_ms, message, trace, file_path, suite, retries, flaky
+FROM test_cases
+WHERE test_suite_id = ?
+ORDER BY name;

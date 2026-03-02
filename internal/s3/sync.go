@@ -7,16 +7,18 @@ import (
 	"path"
 	"time"
 
+	"github.com/quay/release-readiness/internal/ctrf"
 	"github.com/quay/release-readiness/internal/model"
 )
 
 // Store is the subset of the database layer needed by the S3 syncer.
 type Store interface {
 	SnapshotExistsByName(ctx context.Context, name string) (bool, error)
-	CreateSnapshot(ctx context.Context, application, name, triggerComponent, triggerGitSHA, triggerPipelineRun string, testsPassed, released bool, releaseBlockedReason string, createdAt time.Time) (*model.SnapshotRecord, error)
+	CreateSnapshot(ctx context.Context, application, name string, testsPassed bool, createdAt time.Time) (*model.SnapshotRecord, error)
 	EnsureComponent(ctx context.Context, name string) (*model.Component, error)
 	CreateSnapshotComponent(ctx context.Context, snapshotID int64, component, gitSHA, imageURL, gitURL string) error
-	CreateSnapshotTestResult(ctx context.Context, snapshotID int64, scenario, status, pipelineRun string, total, passed, failed, skipped int, durationSec float64) error
+	CreateTestSuite(ctx context.Context, snapshotID int64, name, status, pipelineRun, toolName, toolVersion string, tests, passed, failed, skipped, pending, other, flaky int, startTime, stopTime, durationMs int64) (int64, error)
+	CreateTestCase(ctx context.Context, testSuiteID int64, name, status string, durationMs float64, message, trace, filePath, suite string, retries int, flaky bool) error
 }
 
 // Syncer orchestrates periodic S3 snapshot synchronisation into a Store.
@@ -65,7 +67,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 		for _, key := range keys {
 			snap, err := s.client.GetSnapshot(ctx, key)
 			if err != nil {
-				s.logger.Error("get snapshot", "key", key, "error", err)
+				s.logger.Debug("skipping snapshot", "key", key, "error", err)
 				continue
 			}
 
@@ -87,41 +89,47 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 	}
 }
 
+type suiteData struct {
+	name   string
+	report *ctrf.Report
+}
+
 // ingest persists a single snapshot and its components/test results into the store.
 func (s *Syncer) ingest(ctx context.Context, key string, snap *model.Snapshot) error {
 	// Derive the snapshot directory prefix from the key.
 	// key is like "{app}/snapshots/{snapshot-name}/snapshot.json"
-	// We need "{app}/snapshots/{snapshot-name}/" as the base for JUnit paths.
 	snapshotDir := path.Dir(key) + "/"
 
-	// Fetch JUnit data for each test result before writing to DB.
-	for i, tr := range snap.TestResults {
-		junitPrefix := snapshotDir + "junit/" + tr.Scenario + "/"
-		result, err := s.client.GetTestResults(ctx, junitPrefix)
+	// Discover test suites from S3 and fetch CTRF reports to determine testsPassed.
+	suiteNames, err := s.client.ListTestSuites(ctx, snapshotDir)
+	if err != nil {
+		s.logger.Debug("no test suites found", "snapshot", snap.Snapshot, "error", err)
+	}
+
+	var suites []suiteData
+	testsPassed := len(suiteNames) > 0
+	for _, name := range suiteNames {
+		ctrfPath := snapshotDir + name + "/results/ctrf-report.json"
+		report, err := s.client.GetCTRFReport(ctx, ctrfPath)
 		if err != nil {
-			s.logger.Debug("no junit data", "scenario", tr.Scenario, "path", junitPrefix)
+			s.logger.Debug("failed to fetch ctrf report", "suite", name, "error", err)
 			continue
 		}
-		snap.TestResults[i].Summary = &model.TestSummary{
-			Total:       result.Total,
-			Passed:      result.Passed,
-			Failed:      result.Failed,
-			Skipped:     result.Skipped,
-			DurationSec: result.DurationSec,
+		suites = append(suites, suiteData{name: name, report: report})
+		if report.Results.Summary.Failed > 0 {
+			testsPassed = false
 		}
+	}
+	if len(suites) == 0 {
+		testsPassed = false
 	}
 
 	snapshotRecord, err := s.store.CreateSnapshot(
 		ctx,
 		snap.Application,
 		snap.Snapshot,
-		snap.Trigger.Component,
-		snap.Trigger.GitSHA,
-		snap.Trigger.PipelineRun,
-		snap.Readiness.TestsPassed,
-		snap.Readiness.Released,
-		snap.Readiness.ReleaseBlockedReason,
-		snap.CreatedAt,
+		testsPassed,
+		time.Now().UTC(),
 	)
 	if err != nil {
 		return fmt.Errorf("create snapshot: %w", err)
@@ -137,27 +145,34 @@ func (s *Syncer) ingest(ctx context.Context, key string, snap *model.Snapshot) e
 		}
 	}
 
-	for _, tr := range snap.TestResults {
-		total, passed, failed, skipped := 0, 0, 0, 0
-		var durationSec float64
-		if tr.Summary != nil {
-			total = tr.Summary.Total
-			passed = tr.Summary.Passed
-			failed = tr.Summary.Failed
-			skipped = tr.Summary.Skipped
-			durationSec = tr.Summary.DurationSec
+	for _, sd := range suites {
+		status := "passed"
+		if sd.report.Results.Summary.Failed > 0 {
+			status = "failed"
 		}
 
-		if err := s.store.CreateSnapshotTestResult(
-			ctx,
-			snapshotRecord.ID,
-			tr.Scenario,
-			tr.Status,
-			tr.PipelineRun,
-			total, passed, failed, skipped,
-			durationSec,
-		); err != nil {
-			return fmt.Errorf("create snapshot test result %s: %w", tr.Scenario, err)
+		sum := sd.report.Results.Summary
+		suiteID, err := s.store.CreateTestSuite(
+			ctx, snapshotRecord.ID,
+			sd.name, status, "",
+			sd.report.Results.Tool.Name, sd.report.Results.Tool.Version,
+			sum.Tests, sum.Passed, sum.Failed, sum.Skipped,
+			sum.Pending, sum.Other, sum.Flaky,
+			sum.Start, sum.Stop, sum.Stop-sum.Start,
+		)
+		if err != nil {
+			return fmt.Errorf("create test suite %s: %w", sd.name, err)
+		}
+
+		for _, tc := range sd.report.Results.Tests {
+			if err := s.store.CreateTestCase(
+				ctx, suiteID,
+				tc.Name, tc.Status, tc.Duration,
+				tc.Message, tc.Trace, tc.FilePath, tc.Suite,
+				tc.Retries, tc.Flaky,
+			); err != nil {
+				return fmt.Errorf("create test case %s: %w", tc.Name, err)
+			}
 		}
 	}
 

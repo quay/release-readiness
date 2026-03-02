@@ -51,7 +51,7 @@ The Vite dev server proxies `/api` requests to `localhost:8088` (the Go backend)
 - **`internal/s3/`** — AWS SDK v2 client for fetching snapshot data from S3/Garage object storage.
 - **`internal/jira/`** — JIRA REST API client. Discovers active releases, syncs issues by fixVersion.
 - **`internal/model/`** — Shared data types used across packages.
-- **`internal/junit/`** — JUnit XML test result parser.
+- **`internal/ctrf/`** — CTRF (Common Test Report Format) JSON types.
 
 ### Frontend (`web/`)
 - React 19 + TypeScript, built with Vite 6

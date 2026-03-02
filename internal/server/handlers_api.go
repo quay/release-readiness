@@ -193,7 +193,7 @@ func (s *Server) handleReleasesOverview(w http.ResponseWriter, r *http.Request) 
 				// Return snapshot metadata only (no components/test_results)
 				snapCopy := *s
 				snapCopy.Components = nil
-				snapCopy.TestResults = nil
+				snapCopy.TestSuites = nil
 				snap = &snapCopy
 				testsPassed = s.TestsPassed
 				hasTests = s.HasTests

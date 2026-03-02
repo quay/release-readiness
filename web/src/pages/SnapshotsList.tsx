@@ -15,7 +15,7 @@ import { getRelease, listSnapshots } from "../api/client";
 import type { SnapshotRecord } from "../api/types";
 import StatusLabel from "../components/StatusLabel";
 import { useCachedFetch } from "../hooks/useCachedFetch";
-import { formatReleaseName, githubCommitUrl } from "../utils/links";
+import { formatReleaseName } from "../utils/links";
 
 const PAGE_SIZE = 50;
 
@@ -121,69 +121,29 @@ export default function SnapshotsList() {
 								<Tr>
 									<Th>Snapshot</Th>
 									<Th>Application</Th>
-									<Th>Trigger</Th>
 									<Th>Tests</Th>
-									<Th>Released</Th>
 									<Th>Created</Th>
 								</Tr>
 							</Thead>
 							<Tbody>
-								{snapshots.map((s) => {
-									const commitUrl = githubCommitUrl(
-										s.trigger_component,
-										s.trigger_git_sha,
-									);
-									return (
-										<Tr key={s.id}>
-											<Td>
-												{s.trigger_pipeline_run ? (
-													<a
-														href={s.trigger_pipeline_run}
-														target="_blank"
-														rel="noopener noreferrer"
-													>
-														{s.name}
-													</a>
-												) : (
-													s.name
-												)}
-											</Td>
-											<Td>{s.application}</Td>
-											<Td>
-												{s.trigger_component}
-												{" @ "}
-												{commitUrl ? (
-													<a
-														href={commitUrl}
-														target="_blank"
-														rel="noopener noreferrer"
-													>
-														<code>{s.trigger_git_sha?.substring(0, 12)}</code>
-													</a>
-												) : (
-													<code>{s.trigger_git_sha?.substring(0, 12)}</code>
-												)}
-											</Td>
-											<Td>
-												<StatusLabel
-													status={
-														!s.has_tests
-															? "not_configured"
-															: s.tests_passed
-																? "passed"
-																: "failed"
-													}
-												/>
-											</Td>
-											<Td>
-												<StatusLabel
-													status={s.released ? "passed" : "pending"}
-												/>
-											</Td>
-											<Td>{new Date(s.created_at).toLocaleString()}</Td>
-										</Tr>
-									);
-								})}
+								{snapshots.map((s) => (
+									<Tr key={s.id}>
+										<Td>{s.name}</Td>
+										<Td>{s.application}</Td>
+										<Td>
+											<StatusLabel
+												status={
+													!s.has_tests
+														? "not_configured"
+														: s.tests_passed
+															? "passed"
+															: "failed"
+												}
+											/>
+										</Td>
+										<Td>{new Date(s.created_at).toLocaleString()}</Td>
+									</Tr>
+								))}
 							</Tbody>
 						</Table>
 						<Pagination
