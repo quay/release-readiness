@@ -19,6 +19,7 @@ RUN CGO_ENABLED=0 go build -o /opt/app-root/release-readiness ./cmd/release-read
 
 FROM registry.access.redhat.com/ubi9-micro:latest
 
+COPY --from=builder /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
 COPY --from=builder /opt/app-root/release-readiness /usr/local/bin/release-readiness
 
 EXPOSE 8080
