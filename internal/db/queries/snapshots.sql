@@ -35,7 +35,8 @@ ORDER BY id DESC LIMIT ? OFFSET ?;
 
 -- name: LatestSnapshotPerApplication :many
 SELECT s.id, s.application, s.name, s.trigger_component, s.trigger_git_sha, s.trigger_pipeline_run,
-       s.tests_passed, s.released, s.release_blocked_reason, s.created_at, CAST(counts.cnt AS INTEGER) AS cnt
+       s.tests_passed, s.released, s.release_blocked_reason, s.created_at, CAST(counts.cnt AS INTEGER) AS cnt,
+       (SELECT COUNT(*) FROM snapshot_test_results WHERE snapshot_id = s.id) AS test_count
 FROM snapshots s
 JOIN (
     SELECT application, MAX(id) AS max_id, COUNT(*) AS cnt
