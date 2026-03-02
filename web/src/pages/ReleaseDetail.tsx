@@ -142,8 +142,6 @@ export default function ReleaseDetail() {
 					release={release}
 					readiness={readinessSignal ?? null}
 					jiraBaseUrl={config?.jira_base_url}
-				/>
-				<ApprovalProgress
 					snapshot={snapshot ?? null}
 					issueSummary={issueSummary ?? null}
 				/>
@@ -195,7 +193,9 @@ export default function ReleaseDetail() {
 								<FlexItem style={{ textAlign: "center" }}>
 									<div className="rr-label">Tests</div>
 									<div>
-										{snapshot.tests_passed ? (
+										{!snapshot.has_tests ? (
+											<Label color="grey">N/A</Label>
+										) : snapshot.tests_passed ? (
 											<Label color="green" icon={<CheckCircleIcon />}>
 												Passed
 											</Label>
@@ -347,10 +347,14 @@ function ReleaseSignal({
 	release,
 	readiness,
 	jiraBaseUrl,
+	snapshot,
+	issueSummary,
 }: {
 	release: ReleaseVersion;
 	readiness: ReadinessResponse | null;
 	jiraBaseUrl?: string;
+	snapshot: SnapshotRecord | null;
+	issueSummary: IssueSummary | null;
 }) {
 	const dueDate = release.due_date ? new Date(release.due_date) : null;
 	const releaseDate = release.release_date
@@ -377,6 +381,25 @@ function ReleaseSignal({
 				jiraBaseUrl || "https://issues.redhat.com",
 			)
 		: null;
+
+	const buildsReady =
+		snapshot !== null &&
+		snapshot.components !== undefined &&
+		snapshot.components.length > 0;
+	const hasTests = snapshot?.has_tests ?? false;
+	const allTestsPassed = hasTests && (snapshot?.tests_passed ?? false);
+	const bugsVerified =
+		issueSummary !== null && issueSummary.total > 0 && issueSummary.open === 0;
+	const qeSignOff = allTestsPassed && (bugsVerified || issueSummary === null);
+
+	const progressItems = [
+		{ label: "Builds ready", done: buildsReady },
+		{ label: "Tests passed", done: allTestsPassed },
+		...(issueSummary ? [{ label: "Bugs verified", done: bugsVerified }] : []),
+		{ label: "QE sign off", done: qeSignOff },
+	];
+
+	const firstIncomplete = progressItems.findIndex((i) => !i.done);
 
 	return (
 		<Card isCompact style={{ marginBottom: "1rem" }}>
@@ -429,41 +452,8 @@ function ReleaseSignal({
 						</FlexItem>
 					)}
 				</Flex>
-			</CardBody>
-		</Card>
-	);
-}
-
-function ApprovalProgress({
-	snapshot,
-	issueSummary,
-}: {
-	snapshot: SnapshotRecord | null;
-	issueSummary: IssueSummary | null;
-}) {
-	const buildsReady =
-		snapshot !== null &&
-		snapshot.components !== undefined &&
-		snapshot.components.length > 0;
-	const allTestsPassed = snapshot?.tests_passed ?? false;
-	const bugsVerified =
-		issueSummary !== null && issueSummary.total > 0 && issueSummary.open === 0;
-	const qeSignOff = allTestsPassed && (bugsVerified || issueSummary === null);
-
-	const items = [
-		{ label: "Builds ready", done: buildsReady },
-		{ label: "Tests passed", done: allTestsPassed },
-		...(issueSummary ? [{ label: "Bugs verified", done: bugsVerified }] : []),
-		{ label: "QE sign off", done: qeSignOff },
-	];
-
-	const firstIncomplete = items.findIndex((i) => !i.done);
-
-	return (
-		<Card isCompact style={{ marginBottom: "1rem" }}>
-			<CardBody>
-				<ProgressStepper isCenterAligned>
-					{items.map((item, idx) => (
+				<ProgressStepper isCenterAligned style={{ marginTop: "1rem" }}>
+					{progressItems.map((item, idx) => (
 						<ProgressStep
 							key={item.label}
 							variant={item.done ? "success" : "pending"}

@@ -26,6 +26,7 @@ type SnapshotRecord struct {
 	TriggerGitSHA        string               `json:"trigger_git_sha"`
 	TriggerPipelineRun   string               `json:"trigger_pipeline_run"`
 	TestsPassed          bool                 `json:"tests_passed"`
+	HasTests             bool                 `json:"has_tests"`
 	Released             bool                 `json:"released"`
 	ReleaseBlockedReason string               `json:"release_blocked_reason,omitempty"`
 	CreatedAt            time.Time            `json:"created_at"`

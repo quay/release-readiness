@@ -132,19 +132,21 @@ func (s *Server) handleGetReleaseReadiness(w http.ResponseWriter, r *http.Reques
 	issueSummary, _ := s.db.GetIssueSummary(ctx, version)
 
 	testsPassed := false
+	hasTests := false
 	if release.S3Application != "" {
 		apps, err := s.db.LatestSnapshotPerApplication(ctx)
 		if err == nil {
 			for _, app := range apps {
 				if app.Application == release.S3Application && app.LatestSnapshot != nil {
 					testsPassed = app.LatestSnapshot.TestsPassed
+					hasTests = app.LatestSnapshot.HasTests
 					break
 				}
 			}
 		}
 	}
 
-	writeJSON(w, http.StatusOK, computeReadiness(release, issueSummary, testsPassed))
+	writeJSON(w, http.StatusOK, computeReadiness(release, issueSummary, testsPassed, hasTests))
 }
 
 func (s *Server) handleReleasesOverview(w http.ResponseWriter, r *http.Request) {
@@ -185,6 +187,7 @@ func (s *Server) handleReleasesOverview(w http.ResponseWriter, r *http.Request) 
 		summary := issueSummaries[rel.Name]
 		var snap *model.SnapshotRecord
 		testsPassed := false
+		hasTests := false
 		if rel.S3Application != "" {
 			if s := snapshotMap[rel.S3Application]; s != nil {
 				// Return snapshot metadata only (no components/test_results)
@@ -193,13 +196,14 @@ func (s *Server) handleReleasesOverview(w http.ResponseWriter, r *http.Request) 
 				snapCopy.TestResults = nil
 				snap = &snapCopy
 				testsPassed = s.TestsPassed
+				hasTests = s.HasTests
 			}
 		}
 
 		overviews[i] = model.ReleaseOverview{
 			Release:      rel,
 			IssueSummary: summary,
-			Readiness:    computeReadiness(&rel, summary, testsPassed),
+			Readiness:    computeReadiness(&rel, summary, testsPassed, hasTests),
 			Snapshot:     snap,
 		}
 	}
@@ -209,7 +213,7 @@ func (s *Server) handleReleasesOverview(w http.ResponseWriter, r *http.Request) 
 
 // computeReadiness derives a readiness signal from release metadata,
 // issue summary, and test status.
-func computeReadiness(release *model.ReleaseVersion, issueSummary *model.IssueSummary, testsPassed bool) model.ReadinessResponse {
+func computeReadiness(release *model.ReleaseVersion, issueSummary *model.IssueSummary, testsPassed, hasTests bool) model.ReadinessResponse {
 	if release.Released {
 		return model.ReadinessResponse{Signal: "green", Message: "Released"}
 	}
@@ -219,14 +223,15 @@ func computeReadiness(release *model.ReleaseVersion, issueSummary *model.IssueSu
 	message := "All checks passing"
 
 	openIssues := issueSummary != nil && issueSummary.Open > 0
+	testsFailing := hasTests && !testsPassed
 
 	if release.DueDate != nil && now.After(*release.DueDate) {
 		signal = "red"
 		message = "Past due date"
-	} else if !testsPassed && openIssues {
+	} else if testsFailing && openIssues {
 		signal = "red"
 		message = "Tests failing and open issues remain"
-	} else if !testsPassed {
+	} else if testsFailing {
 		signal = "yellow"
 		message = "Integration tests failing"
 	} else if openIssues {

@@ -166,7 +166,13 @@ export default function SnapshotsList() {
 											</Td>
 											<Td>
 												<StatusLabel
-													status={s.tests_passed ? "passed" : "failed"}
+													status={
+														!s.has_tests
+															? "not_configured"
+															: s.tests_passed
+																? "passed"
+																: "failed"
+													}
 												/>
 											</Td>
 											<Td>

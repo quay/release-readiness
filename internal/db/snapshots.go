@@ -63,6 +63,7 @@ func (d *DB) GetSnapshotByName(ctx context.Context, name string) (*model.Snapsho
 		return nil, err
 	}
 	s.TestResults = results
+	s.HasTests = len(results) > 0
 
 	return &s, nil
 }
@@ -136,6 +137,7 @@ func (d *DB) LatestSnapshotPerApplication(ctx context.Context) ([]model.Applicat
 			TriggerGitSHA:        r.TriggerGitSha,
 			TriggerPipelineRun:   r.TriggerPipelineRun,
 			TestsPassed:          r.TestsPassed == 1,
+			HasTests:             r.TestCount > 0,
 			Released:             r.Released == 1,
 			ReleaseBlockedReason: r.ReleaseBlockedReason,
 			CreatedAt:            parseTime(r.CreatedAt),

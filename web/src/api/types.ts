@@ -29,6 +29,7 @@ export interface SnapshotRecord {
 	trigger_git_sha: string;
 	trigger_pipeline_run: string;
 	tests_passed: boolean;
+	has_tests: boolean;
 	released: boolean;
 	release_blocked_reason?: string;
 	created_at: string;

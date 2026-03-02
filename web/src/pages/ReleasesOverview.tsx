@@ -336,7 +336,11 @@ function ReleaseCard({
 							<DescriptionListGroup>
 								<DescriptionListTerm>Tests</DescriptionListTerm>
 								<DescriptionListDescription>
-									{snapshot.tests_passed ? (
+									{!snapshot.has_tests ? (
+										<Label color="grey" isCompact>
+											N/A
+										</Label>
+									) : snapshot.tests_passed ? (
 										<Label color="green" icon={<CheckCircleIcon />} isCompact>
 											Passed
 										</Label>
@@ -385,7 +389,11 @@ function ReleaseCard({
 									<FlexItem>
 										<span className="rr-label">Tests</span>
 										<div>
-											{snapshot.tests_passed ? (
+											{!snapshot.has_tests ? (
+												<Label color="grey" isCompact>
+													N/A
+												</Label>
+											) : snapshot.tests_passed ? (
 												<Label
 													color="green"
 													icon={<CheckCircleIcon />}
