@@ -40,16 +40,11 @@ type ReleaseVersion struct {
 }
 
 type Snapshot struct {
-	ID                   int64
-	Application          string
-	Name                 string
-	TriggerComponent     string
-	TriggerGitSha        string
-	TriggerPipelineRun   string
-	TestsPassed          int64
-	Released             int64
-	ReleaseBlockedReason string
-	CreatedAt            string
+	ID          int64
+	Application string
+	Name        string
+	TestsPassed int64
+	CreatedAt   string
 }
 
 type SnapshotComponent struct {
@@ -61,16 +56,37 @@ type SnapshotComponent struct {
 	GitUrl     string
 }
 
-type SnapshotTestResult struct {
+type TestCase struct {
+	ID          int64
+	TestSuiteID int64
+	Name        string
+	Status      string
+	DurationMs  float64
+	Message     string
+	Trace       string
+	FilePath    string
+	Suite       string
+	Retries     int64
+	Flaky       int64
+}
+
+type TestSuite struct {
 	ID          int64
 	SnapshotID  int64
-	Scenario    string
+	Name        string
 	Status      string
 	PipelineRun string
-	Total       int64
+	ToolName    string
+	ToolVersion string
+	Tests       int64
 	Passed      int64
 	Failed      int64
 	Skipped     int64
-	DurationSec float64
+	Pending     int64
+	Other       int64
+	Flaky       int64
+	StartTime   int64
+	StopTime    int64
+	DurationMs  int64
 	CreatedAt   string
 }

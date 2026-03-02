@@ -51,7 +51,6 @@ import PriorityLabel from "../components/PriorityLabel";
 import StatusLabel from "../components/StatusLabel";
 import { useCachedFetch } from "../hooks/useCachedFetch";
 import { useConfig } from "../hooks/useConfig";
-import { formatDuration } from "../utils/format";
 import { formatReleaseName, jiraIssueUrl, quayImageUrl } from "../utils/links";
 
 export default function ReleaseDetail() {
@@ -159,38 +158,6 @@ export default function ReleaseDetail() {
 									<div>{snapshot.name}</div>
 								</FlexItem>
 								<FlexItem style={{ textAlign: "center" }}>
-									<div className="rr-label">Trigger Component</div>
-									<div>{snapshot.trigger_component}</div>
-								</FlexItem>
-								<FlexItem style={{ textAlign: "center" }}>
-									<div className="rr-label">Git SHA</div>
-									<div>
-										<GitShaLink
-											component={snapshot.trigger_component}
-											sha={snapshot.trigger_git_sha}
-											gitUrl={
-												snapshot.components?.find(
-													(c) => c.component === snapshot.trigger_component,
-												)?.git_url
-											}
-										/>
-									</div>
-								</FlexItem>
-								{snapshot.trigger_pipeline_run && (
-									<FlexItem style={{ textAlign: "center" }}>
-										<div className="rr-label">Pipeline Run</div>
-										<div>
-											<a
-												href={snapshot.trigger_pipeline_run}
-												target="_blank"
-												rel="noopener noreferrer"
-											>
-												View in Konflux
-											</a>
-										</div>
-									</FlexItem>
-								)}
-								<FlexItem style={{ textAlign: "center" }}>
 									<div className="rr-label">Tests</div>
 									<div>
 										{!snapshot.has_tests ? (
@@ -206,22 +173,6 @@ export default function ReleaseDetail() {
 										)}
 									</div>
 								</FlexItem>
-								<FlexItem style={{ textAlign: "center" }}>
-									<div className="rr-label">Released</div>
-									<div>
-										{snapshot.released ? (
-											<Label color="green">Yes</Label>
-										) : (
-											<Label color="grey">No</Label>
-										)}
-									</div>
-								</FlexItem>
-								{snapshot.release_blocked_reason && (
-									<FlexItem style={{ textAlign: "center" }}>
-										<div className="rr-label">Blocked</div>
-										<div>{snapshot.release_blocked_reason}</div>
-									</FlexItem>
-								)}
 								<FlexItem style={{ textAlign: "center" }}>
 									<div className="rr-label">Created</div>
 									<div>{new Date(snapshot.created_at).toLocaleString()}</div>
@@ -286,10 +237,10 @@ export default function ReleaseDetail() {
 								</ExpandableSection>
 							)}
 
-							{/* Test Results Table */}
-							{snapshot.test_results && snapshot.test_results.length > 0 && (
+							{/* Test Suites Table */}
+							{snapshot.test_suites && snapshot.test_suites.length > 0 && (
 								<ExpandableSection
-									toggleText={`Integration Test Results (${snapshot.test_results.length})`}
+									toggleText={`Test Suites (${snapshot.test_suites.length})`}
 									isExpanded={testResultsExpanded}
 									onToggle={(_e, val) => setTestResultsExpanded(val)}
 									style={{ marginTop: "1rem" }}
@@ -297,31 +248,30 @@ export default function ReleaseDetail() {
 									<Table variant="compact">
 										<Thead>
 											<Tr>
-												<Th>Scenario</Th>
+												<Th>Suite</Th>
 												<Th>Status</Th>
+												<Th>Tool</Th>
 												<Th modifier="fitContent">Passed</Th>
 												<Th modifier="fitContent">Failed</Th>
 												<Th modifier="fitContent">Skipped</Th>
 												<Th modifier="fitContent">Total</Th>
-												<Th modifier="fitContent">Duration</Th>
 											</Tr>
 										</Thead>
 										<Tbody>
-											{snapshot.test_results.map((tr) => (
-												<Tr key={tr.id}>
-													<Td>{tr.scenario}</Td>
+											{snapshot.test_suites.map((ts) => (
+												<Tr key={ts.id}>
+													<Td>{ts.name}</Td>
 													<Td>
-														<StatusLabel status={tr.status} />
+														<StatusLabel status={ts.status} />
 													</Td>
-													<Td>{tr.total === 0 ? "\u2014" : tr.passed}</Td>
-													<Td>{tr.total === 0 ? "\u2014" : tr.failed}</Td>
-													<Td>{tr.total === 0 ? "\u2014" : tr.skipped}</Td>
-													<Td>{tr.total === 0 ? "\u2014" : tr.total}</Td>
 													<Td>
-														{tr.total === 0
-															? "\u2014"
-															: formatDuration(tr.duration_sec)}
+														{ts.tool_name}
+														{ts.tool_version ? ` ${ts.tool_version}` : ""}
 													</Td>
+													<Td>{ts.tests === 0 ? "\u2014" : ts.passed}</Td>
+													<Td>{ts.tests === 0 ? "\u2014" : ts.failed}</Td>
+													<Td>{ts.tests === 0 ? "\u2014" : ts.skipped}</Td>
+													<Td>{ts.tests === 0 ? "\u2014" : ts.tests}</Td>
 												</Tr>
 											))}
 										</Tbody>

@@ -51,7 +51,7 @@ func TestListSnapshots(t *testing.T) {
 	srv := setupTestServer(t)
 	ctx := t.Context()
 
-	_, err := srv.db.CreateSnapshot(ctx, "quay-v3-17", "quay-v3-17-20260213-000", "quay", "abc123", "pr-1", true, false, "", time.Now())
+	_, err := srv.db.CreateSnapshot(ctx, "quay-v3-17", "quay-v3-17-20260213-000", true, time.Now())
 	if err != nil {
 		t.Fatalf("create snapshot: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestGetReleaseSnapshot(t *testing.T) {
 	ctx := t.Context()
 
 	// Create a snapshot for the S3 application
-	_, err := srv.db.CreateSnapshot(ctx, "quay-v3-16", "quay-v3-16-snap-1", "quay", "abc123", "pr-1", true, false, "", time.Now())
+	_, err := srv.db.CreateSnapshot(ctx, "quay-v3-16", "quay-v3-16-snap-1", true, time.Now())
 	if err != nil {
 		t.Fatalf("create snapshot: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestReleasesOverview(t *testing.T) {
 		t.Fatalf("upsert release: %v", err)
 	}
 
-	_, err = srv.db.CreateSnapshot(ctx, "quay-v3-16", "quay-v3-16-snap-1", "quay", "abc123", "pr-1", true, false, "", time.Now())
+	_, err = srv.db.CreateSnapshot(ctx, "quay-v3-16", "quay-v3-16-snap-1", true, time.Now())
 	if err != nil {
 		t.Fatalf("create snapshot: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestGetReleaseReadiness(t *testing.T) {
 	}
 
 	// Create a passing snapshot
-	_, err = srv.db.CreateSnapshot(ctx, "quay-v3-16", "quay-v3-16-snap-1", "quay", "abc123", "pr-1", true, false, "", time.Now())
+	_, err = srv.db.CreateSnapshot(ctx, "quay-v3-16", "quay-v3-16-snap-1", true, time.Now())
 	if err != nil {
 		t.Fatalf("create snapshot: %v", err)
 	}

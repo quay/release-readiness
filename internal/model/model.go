@@ -19,33 +19,50 @@ type ComponentRecord struct {
 }
 
 type SnapshotRecord struct {
-	ID                   int64                `json:"id"`
-	Application          string               `json:"application"`
-	Name                 string               `json:"name"`
-	TriggerComponent     string               `json:"trigger_component"`
-	TriggerGitSHA        string               `json:"trigger_git_sha"`
-	TriggerPipelineRun   string               `json:"trigger_pipeline_run"`
-	TestsPassed          bool                 `json:"tests_passed"`
-	HasTests             bool                 `json:"has_tests"`
-	Released             bool                 `json:"released"`
-	ReleaseBlockedReason string               `json:"release_blocked_reason,omitempty"`
-	CreatedAt            time.Time            `json:"created_at"`
-	Components           []ComponentRecord    `json:"components,omitempty"`
-	TestResults          []SnapshotTestResult `json:"test_results,omitempty"`
+	ID          int64             `json:"id"`
+	Application string            `json:"application"`
+	Name        string            `json:"name"`
+	TestsPassed bool              `json:"tests_passed"`
+	HasTests    bool              `json:"has_tests"`
+	CreatedAt   time.Time         `json:"created_at"`
+	Components  []ComponentRecord `json:"components,omitempty"`
+	TestSuites  []TestSuite       `json:"test_suites,omitempty"`
 }
 
-type SnapshotTestResult struct {
-	ID          int64     `json:"id"`
-	SnapshotID  int64     `json:"snapshot_id"`
-	Scenario    string    `json:"scenario"`
-	Status      string    `json:"status"`
-	PipelineRun string    `json:"pipeline_run"`
-	Total       int       `json:"total"`
-	Passed      int       `json:"passed"`
-	Failed      int       `json:"failed"`
-	Skipped     int       `json:"skipped"`
-	DurationSec float64   `json:"duration_sec"`
-	CreatedAt   time.Time `json:"created_at"`
+type TestSuite struct {
+	ID          int64      `json:"id"`
+	SnapshotID  int64      `json:"snapshot_id"`
+	Name        string     `json:"name"`
+	Status      string     `json:"status"`
+	PipelineRun string     `json:"pipeline_run"`
+	ToolName    string     `json:"tool_name"`
+	ToolVersion string     `json:"tool_version"`
+	Tests       int        `json:"tests"`
+	Passed      int        `json:"passed"`
+	Failed      int        `json:"failed"`
+	Skipped     int        `json:"skipped"`
+	Pending     int        `json:"pending"`
+	Other       int        `json:"other"`
+	Flaky       int        `json:"flaky"`
+	StartTime   int64      `json:"start_time"`
+	StopTime    int64      `json:"stop_time"`
+	DurationMs  int64      `json:"duration_ms"`
+	CreatedAt   time.Time  `json:"created_at"`
+	TestCases   []TestCase `json:"test_cases,omitempty"`
+}
+
+type TestCase struct {
+	ID          int64   `json:"id"`
+	TestSuiteID int64   `json:"test_suite_id"`
+	Name        string  `json:"name"`
+	Status      string  `json:"status"`
+	DurationMs  float64 `json:"duration_ms"`
+	Message     string  `json:"message,omitempty"`
+	Trace       string  `json:"trace,omitempty"`
+	FilePath    string  `json:"file_path,omitempty"`
+	Suite       string  `json:"suite,omitempty"`
+	Retries     int     `json:"retries"`
+	Flaky       bool    `json:"flaky"`
 }
 
 type ApplicationSummary struct {

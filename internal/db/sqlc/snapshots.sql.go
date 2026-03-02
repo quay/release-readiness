@@ -10,32 +10,22 @@ import (
 )
 
 const createSnapshot = `-- name: CreateSnapshot :execlastid
-INSERT INTO snapshots (application, name, trigger_component, trigger_git_sha, trigger_pipeline_run, tests_passed, released, release_blocked_reason, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO snapshots (application, name, tests_passed, created_at)
+VALUES (?, ?, ?, ?)
 `
 
 type CreateSnapshotParams struct {
-	Application          string
-	Name                 string
-	TriggerComponent     string
-	TriggerGitSha        string
-	TriggerPipelineRun   string
-	TestsPassed          int64
-	Released             int64
-	ReleaseBlockedReason string
-	CreatedAt            string
+	Application string
+	Name        string
+	TestsPassed int64
+	CreatedAt   string
 }
 
 func (q *Queries) CreateSnapshot(ctx context.Context, arg CreateSnapshotParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, createSnapshot,
 		arg.Application,
 		arg.Name,
-		arg.TriggerComponent,
-		arg.TriggerGitSha,
-		arg.TriggerPipelineRun,
 		arg.TestsPassed,
-		arg.Released,
-		arg.ReleaseBlockedReason,
 		arg.CreatedAt,
 	)
 	if err != nil {
@@ -68,41 +58,91 @@ func (q *Queries) CreateSnapshotComponent(ctx context.Context, arg CreateSnapsho
 	return err
 }
 
-const createSnapshotTestResult = `-- name: CreateSnapshotTestResult :exec
-INSERT INTO snapshot_test_results (snapshot_id, scenario, status, pipeline_run, total, passed, failed, skipped, duration_sec)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+const createTestCase = `-- name: CreateTestCase :exec
+INSERT INTO test_cases (test_suite_id, name, status, duration_ms, message, trace, file_path, suite, retries, flaky)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
-type CreateSnapshotTestResultParams struct {
-	SnapshotID  int64
-	Scenario    string
+type CreateTestCaseParams struct {
+	TestSuiteID int64
+	Name        string
 	Status      string
-	PipelineRun string
-	Total       int64
-	Passed      int64
-	Failed      int64
-	Skipped     int64
-	DurationSec float64
+	DurationMs  float64
+	Message     string
+	Trace       string
+	FilePath    string
+	Suite       string
+	Retries     int64
+	Flaky       int64
 }
 
-func (q *Queries) CreateSnapshotTestResult(ctx context.Context, arg CreateSnapshotTestResultParams) error {
-	_, err := q.db.ExecContext(ctx, createSnapshotTestResult,
-		arg.SnapshotID,
-		arg.Scenario,
+func (q *Queries) CreateTestCase(ctx context.Context, arg CreateTestCaseParams) error {
+	_, err := q.db.ExecContext(ctx, createTestCase,
+		arg.TestSuiteID,
+		arg.Name,
 		arg.Status,
-		arg.PipelineRun,
-		arg.Total,
-		arg.Passed,
-		arg.Failed,
-		arg.Skipped,
-		arg.DurationSec,
+		arg.DurationMs,
+		arg.Message,
+		arg.Trace,
+		arg.FilePath,
+		arg.Suite,
+		arg.Retries,
+		arg.Flaky,
 	)
 	return err
 }
 
+const createTestSuite = `-- name: CreateTestSuite :execlastid
+INSERT INTO test_suites (snapshot_id, name, status, pipeline_run, tool_name, tool_version, tests, passed, failed, skipped, pending, other, flaky, start_time, stop_time, duration_ms)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreateTestSuiteParams struct {
+	SnapshotID  int64
+	Name        string
+	Status      string
+	PipelineRun string
+	ToolName    string
+	ToolVersion string
+	Tests       int64
+	Passed      int64
+	Failed      int64
+	Skipped     int64
+	Pending     int64
+	Other       int64
+	Flaky       int64
+	StartTime   int64
+	StopTime    int64
+	DurationMs  int64
+}
+
+func (q *Queries) CreateTestSuite(ctx context.Context, arg CreateTestSuiteParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, createTestSuite,
+		arg.SnapshotID,
+		arg.Name,
+		arg.Status,
+		arg.PipelineRun,
+		arg.ToolName,
+		arg.ToolVersion,
+		arg.Tests,
+		arg.Passed,
+		arg.Failed,
+		arg.Skipped,
+		arg.Pending,
+		arg.Other,
+		arg.Flaky,
+		arg.StartTime,
+		arg.StopTime,
+		arg.DurationMs,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
+}
+
 const getSnapshotRow = `-- name: GetSnapshotRow :one
-SELECT id, application, name, trigger_component, trigger_git_sha, trigger_pipeline_run,
-       tests_passed, released, release_blocked_reason, created_at
+SELECT id, application, name, tests_passed, created_at
 FROM snapshots WHERE name = ?
 `
 
@@ -113,21 +153,15 @@ func (q *Queries) GetSnapshotRow(ctx context.Context, name string) (Snapshot, er
 		&i.ID,
 		&i.Application,
 		&i.Name,
-		&i.TriggerComponent,
-		&i.TriggerGitSha,
-		&i.TriggerPipelineRun,
 		&i.TestsPassed,
-		&i.Released,
-		&i.ReleaseBlockedReason,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const latestSnapshotPerApplication = `-- name: LatestSnapshotPerApplication :many
-SELECT s.id, s.application, s.name, s.trigger_component, s.trigger_git_sha, s.trigger_pipeline_run,
-       s.tests_passed, s.released, s.release_blocked_reason, s.created_at, CAST(counts.cnt AS INTEGER) AS cnt,
-       (SELECT COUNT(*) FROM snapshot_test_results WHERE snapshot_id = s.id) AS test_count
+SELECT s.id, s.application, s.name, s.tests_passed, s.created_at, CAST(counts.cnt AS INTEGER) AS cnt,
+       (SELECT COUNT(*) FROM test_suites WHERE snapshot_id = s.id) AS test_count
 FROM snapshots s
 JOIN (
     SELECT application, MAX(id) AS max_id, COUNT(*) AS cnt
@@ -138,18 +172,13 @@ ORDER BY s.application
 `
 
 type LatestSnapshotPerApplicationRow struct {
-	ID                   int64
-	Application          string
-	Name                 string
-	TriggerComponent     string
-	TriggerGitSha        string
-	TriggerPipelineRun   string
-	TestsPassed          int64
-	Released             int64
-	ReleaseBlockedReason string
-	CreatedAt            string
-	Cnt                  int64
-	TestCount            int64
+	ID          int64
+	Application string
+	Name        string
+	TestsPassed int64
+	CreatedAt   string
+	Cnt         int64
+	TestCount   int64
 }
 
 func (q *Queries) LatestSnapshotPerApplication(ctx context.Context) ([]LatestSnapshotPerApplicationRow, error) {
@@ -165,12 +194,7 @@ func (q *Queries) LatestSnapshotPerApplication(ctx context.Context) ([]LatestSna
 			&i.ID,
 			&i.Application,
 			&i.Name,
-			&i.TriggerComponent,
-			&i.TriggerGitSha,
-			&i.TriggerPipelineRun,
 			&i.TestsPassed,
-			&i.Released,
-			&i.ReleaseBlockedReason,
 			&i.CreatedAt,
 			&i.Cnt,
 			&i.TestCount,
@@ -189,8 +213,7 @@ func (q *Queries) LatestSnapshotPerApplication(ctx context.Context) ([]LatestSna
 }
 
 const listAllSnapshots = `-- name: ListAllSnapshots :many
-SELECT id, application, name, trigger_component, trigger_git_sha, trigger_pipeline_run,
-       tests_passed, released, release_blocked_reason, created_at
+SELECT id, application, name, tests_passed, created_at
 FROM snapshots
 ORDER BY id DESC LIMIT ? OFFSET ?
 `
@@ -213,12 +236,7 @@ func (q *Queries) ListAllSnapshots(ctx context.Context, arg ListAllSnapshotsPara
 			&i.ID,
 			&i.Application,
 			&i.Name,
-			&i.TriggerComponent,
-			&i.TriggerGitSha,
-			&i.TriggerPipelineRun,
 			&i.TestsPassed,
-			&i.Released,
-			&i.ReleaseBlockedReason,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -271,51 +289,8 @@ func (q *Queries) ListSnapshotComponents(ctx context.Context, snapshotID int64) 
 	return items, nil
 }
 
-const listSnapshotTestResults = `-- name: ListSnapshotTestResults :many
-SELECT id, snapshot_id, scenario, status, pipeline_run, total, passed, failed, skipped, duration_sec, created_at
-FROM snapshot_test_results
-WHERE snapshot_id = ?
-ORDER BY scenario
-`
-
-func (q *Queries) ListSnapshotTestResults(ctx context.Context, snapshotID int64) ([]SnapshotTestResult, error) {
-	rows, err := q.db.QueryContext(ctx, listSnapshotTestResults, snapshotID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []SnapshotTestResult
-	for rows.Next() {
-		var i SnapshotTestResult
-		if err := rows.Scan(
-			&i.ID,
-			&i.SnapshotID,
-			&i.Scenario,
-			&i.Status,
-			&i.PipelineRun,
-			&i.Total,
-			&i.Passed,
-			&i.Failed,
-			&i.Skipped,
-			&i.DurationSec,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listSnapshotsByApplication = `-- name: ListSnapshotsByApplication :many
-SELECT id, application, name, trigger_component, trigger_git_sha, trigger_pipeline_run,
-       tests_passed, released, release_blocked_reason, created_at
+SELECT id, application, name, tests_passed, created_at
 FROM snapshots
 WHERE application = ?
 ORDER BY id DESC LIMIT ? OFFSET ?
@@ -340,12 +315,98 @@ func (q *Queries) ListSnapshotsByApplication(ctx context.Context, arg ListSnapsh
 			&i.ID,
 			&i.Application,
 			&i.Name,
-			&i.TriggerComponent,
-			&i.TriggerGitSha,
-			&i.TriggerPipelineRun,
 			&i.TestsPassed,
-			&i.Released,
-			&i.ReleaseBlockedReason,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTestCasesBySuite = `-- name: ListTestCasesBySuite :many
+SELECT id, test_suite_id, name, status, duration_ms, message, trace, file_path, suite, retries, flaky
+FROM test_cases
+WHERE test_suite_id = ?
+ORDER BY name
+`
+
+func (q *Queries) ListTestCasesBySuite(ctx context.Context, testSuiteID int64) ([]TestCase, error) {
+	rows, err := q.db.QueryContext(ctx, listTestCasesBySuite, testSuiteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TestCase
+	for rows.Next() {
+		var i TestCase
+		if err := rows.Scan(
+			&i.ID,
+			&i.TestSuiteID,
+			&i.Name,
+			&i.Status,
+			&i.DurationMs,
+			&i.Message,
+			&i.Trace,
+			&i.FilePath,
+			&i.Suite,
+			&i.Retries,
+			&i.Flaky,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTestSuitesBySnapshot = `-- name: ListTestSuitesBySnapshot :many
+SELECT id, snapshot_id, name, status, pipeline_run, tool_name, tool_version, tests, passed, failed, skipped, pending, other, flaky, start_time, stop_time, duration_ms, created_at
+FROM test_suites
+WHERE snapshot_id = ?
+ORDER BY name
+`
+
+func (q *Queries) ListTestSuitesBySnapshot(ctx context.Context, snapshotID int64) ([]TestSuite, error) {
+	rows, err := q.db.QueryContext(ctx, listTestSuitesBySnapshot, snapshotID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TestSuite
+	for rows.Next() {
+		var i TestSuite
+		if err := rows.Scan(
+			&i.ID,
+			&i.SnapshotID,
+			&i.Name,
+			&i.Status,
+			&i.PipelineRun,
+			&i.ToolName,
+			&i.ToolVersion,
+			&i.Tests,
+			&i.Passed,
+			&i.Failed,
+			&i.Skipped,
+			&i.Pending,
+			&i.Other,
+			&i.Flaky,
+			&i.StartTime,
+			&i.StopTime,
+			&i.DurationMs,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
