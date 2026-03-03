@@ -4,7 +4,10 @@ metadata:
   name: release-readiness-data
   labels:
     app: release-readiness
+  annotations:
+    kubernetes.io/reclaimPolicy: Delete
 spec:
+  storageClassName: aws-efs-tier-c4
   accessModes:
     - ReadWriteOnce
   resources:
