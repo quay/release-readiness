@@ -7,7 +7,7 @@ type Report struct {
 
 // Results contains the tool info, summary, and individual test outcomes.
 type Results struct {
-	Tool    Tool   `json:"tool"`
+	Tool    Tool    `json:"tool"`
 	Summary Summary `json:"summary"`
 	Tests   []Test  `json:"tests"`
 }

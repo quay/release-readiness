@@ -37,7 +37,9 @@ const severityColor: Record<string, "red" | "orange" | "yellow" | "grey"> = {
 
 export default function VulnerabilitiesTable({
 	vulnerabilities,
-}: { vulnerabilities: Vulnerability[] }) {
+}: {
+	vulnerabilities: Vulnerability[];
+}) {
 	const [activeSortIndex, setActiveSortIndex] = useState<number | undefined>(
 		undefined,
 	);
@@ -72,9 +74,7 @@ export default function VulnerabilitiesTable({
 			);
 		}
 		if (severityFilters.size > 0) {
-			vulns = vulns.filter((v) =>
-				severityFilters.has(v.severity || "Unknown"),
-			);
+			vulns = vulns.filter((v) => severityFilters.has(v.severity || "Unknown"));
 		}
 
 		if (activeSortIndex !== undefined && activeSortDirection !== undefined) {
@@ -162,8 +162,7 @@ export default function VulnerabilitiesTable({
 						color: "var(--pf-t--global--text--color--subtle)",
 					}}
 				>
-					{processedVulns.length} of {vulnerabilities.length}{" "}
-					vulnerabilities
+					{processedVulns.length} of {vulnerabilities.length} vulnerabilities
 				</div>
 			)}
 			<Table variant="compact" borders={false}>
@@ -201,11 +200,7 @@ export default function VulnerabilitiesTable({
 								/>
 								<Td>
 									{v.link ? (
-										<a
-											href={v.link}
-											target="_blank"
-											rel="noopener noreferrer"
-										>
+										<a href={v.link} target="_blank" rel="noopener noreferrer">
 											{v.name}
 										</a>
 									) : (
@@ -213,12 +208,7 @@ export default function VulnerabilitiesTable({
 									)}
 								</Td>
 								<Td>
-									<Label
-										color={
-											severityColor[v.severity] ?? "grey"
-										}
-										isCompact
-									>
+									<Label color={severityColor[v.severity] ?? "grey"} isCompact>
 										{v.severity || "Unknown"}
 									</Label>
 								</Td>

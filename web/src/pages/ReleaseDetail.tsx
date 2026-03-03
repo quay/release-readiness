@@ -83,12 +83,10 @@ export default function ReleaseDetail() {
 		() => getReleaseReadiness(version!),
 	);
 
-	const [activeSnapshotTab, setActiveSnapshotTab] = useState<
-		string | number
-	>("components");
-	const [expandedSuites, setExpandedSuites] = useState<Set<number>>(
-		new Set(),
+	const [activeSnapshotTab, setActiveSnapshotTab] = useState<string | number>(
+		"components",
 	);
+	const [expandedSuites, setExpandedSuites] = useState<Set<number>>(new Set());
 	const [expandedComponents, setExpandedComponents] = useState<Set<string>>(
 		new Set(),
 	);
@@ -249,10 +247,8 @@ export default function ReleaseDetail() {
 												{snapshot.components.map((c) => {
 													const imgUrl = quayImageUrl(c.image_url);
 													const imgDisplay = c.image_url.includes("/")
-														? (c.image_url
-																.split("/")
-																.pop()
-																?.split("@")[0] ?? c.image_url)
+														? (c.image_url.split("/").pop()?.split("@")[0] ??
+															c.image_url)
 														: c.image_url;
 													return (
 														<Tr key={c.id}>
@@ -289,216 +285,257 @@ export default function ReleaseDetail() {
 									</Tab>
 								)}
 
-								{snapshot.test_suites &&
-									snapshot.test_suites.length > 0 && (
-										<Tab
-											eventKey="testSuites"
-											title={
-												<TabTitleText>
-													Test Suites ({snapshot.test_suites.length})
-												</TabTitleText>
-											}
-										>
-											<Table variant="compact">
-												<Thead>
-													<Tr>
-														<Th screenReaderText="Toggle" />
-														<Th>Suite</Th>
-														<Th>Status</Th>
-														<Th>Tool</Th>
-														<Th modifier="fitContent">Passed</Th>
-														<Th modifier="fitContent">Failed</Th>
-														<Th modifier="fitContent">Skipped</Th>
-														<Th modifier="fitContent">Total</Th>
-													</Tr>
-												</Thead>
-												{snapshot.test_suites.map((ts) => {
-													const isSuiteExpanded = expandedSuites.has(ts.id);
-													return (
-														<Tbody key={ts.id} isExpanded={isSuiteExpanded}>
-															<Tr>
-																<Td
-																	expand={{
-																		rowIndex: ts.id,
-																		isExpanded: isSuiteExpanded,
-																		onToggle: () =>
-																			setExpandedSuites((prev) => {
-																				const next = new Set(prev);
-																				if (next.has(ts.id)) {
-																					next.delete(ts.id);
-																				} else {
-																					next.add(ts.id);
-																				}
-																				return next;
-																			}),
-																	}}
-																/>
-																<Td>{ts.name}</Td>
-																<Td>
-																	<StatusLabel status={ts.status} />
-																</Td>
-																<Td>
-																	{ts.tool_name}
-																	{ts.tool_version
-																		? ` ${ts.tool_version}`
-																		: ""}
-																</Td>
-																<Td>
-																	{ts.tests === 0 ? "\u2014" : ts.passed}
-																</Td>
-																<Td>
-																	{ts.tests === 0 ? "\u2014" : ts.failed}
-																</Td>
-																<Td>
-																	{ts.tests === 0 ? "\u2014" : ts.skipped}
-																</Td>
-																<Td>
-																	{ts.tests === 0 ? "\u2014" : ts.tests}
+								{snapshot.test_suites && snapshot.test_suites.length > 0 && (
+									<Tab
+										eventKey="testSuites"
+										title={
+											<TabTitleText>
+												Test Suites ({snapshot.test_suites.length})
+											</TabTitleText>
+										}
+									>
+										<Table variant="compact">
+											<Thead>
+												<Tr>
+													<Th screenReaderText="Toggle" />
+													<Th>Suite</Th>
+													<Th>Status</Th>
+													<Th>Tool</Th>
+													<Th modifier="fitContent">Passed</Th>
+													<Th modifier="fitContent">Failed</Th>
+													<Th modifier="fitContent">Skipped</Th>
+													<Th modifier="fitContent">Total</Th>
+												</Tr>
+											</Thead>
+											{snapshot.test_suites.map((ts) => {
+												const isSuiteExpanded = expandedSuites.has(ts.id);
+												return (
+													<Tbody key={ts.id} isExpanded={isSuiteExpanded}>
+														<Tr>
+															<Td
+																expand={{
+																	rowIndex: ts.id,
+																	isExpanded: isSuiteExpanded,
+																	onToggle: () =>
+																		setExpandedSuites((prev) => {
+																			const next = new Set(prev);
+																			if (next.has(ts.id)) {
+																				next.delete(ts.id);
+																			} else {
+																				next.add(ts.id);
+																			}
+																			return next;
+																		}),
+																}}
+															/>
+															<Td>{ts.name}</Td>
+															<Td>
+																<StatusLabel status={ts.status} />
+															</Td>
+															<Td>
+																{ts.tool_name}
+																{ts.tool_version ? ` ${ts.tool_version}` : ""}
+															</Td>
+															<Td>{ts.tests === 0 ? "\u2014" : ts.passed}</Td>
+															<Td>{ts.tests === 0 ? "\u2014" : ts.failed}</Td>
+															<Td>{ts.tests === 0 ? "\u2014" : ts.skipped}</Td>
+															<Td>{ts.tests === 0 ? "\u2014" : ts.tests}</Td>
+														</Tr>
+														{isSuiteExpanded && (
+															<Tr isExpanded>
+																<Td colSpan={8}>
+																	<ExpandableRowContent>
+																		{ts.test_cases &&
+																		ts.test_cases.length > 0 ? (
+																			<TestCasesTable
+																				testCases={ts.test_cases}
+																			/>
+																		) : (
+																			<em>No test cases recorded.</em>
+																		)}
+																	</ExpandableRowContent>
 																</Td>
 															</Tr>
-															{isSuiteExpanded && (
-																<Tr isExpanded>
-																	<Td colSpan={8}>
-																		<ExpandableRowContent>
-																			{ts.test_cases &&
-																			ts.test_cases.length > 0 ? (
-																				<TestCasesTable
-																					testCases={ts.test_cases}
-																				/>
-																			) : (
-																				<em>No test cases recorded.</em>
-																			)}
-																		</ExpandableRowContent>
-																	</Td>
-																</Tr>
-															)}
-														</Tbody>
-													);
-												})}
-											</Table>
-										</Tab>
-									)}
+														)}
+													</Tbody>
+												);
+											})}
+										</Table>
+									</Tab>
+								)}
 								{groupedVulnReports.length > 0 && (
-										<Tab
-											eventKey="securityScans"
-											title={
-												<TabTitleText>
-													Security Scans ({groupedVulnReports.length})
-												</TabTitleText>
-											}
-										>
-											<Table variant="compact">
-												<Thead>
-													<Tr>
-														<Th screenReaderText="Toggle" />
-														<Th>Component</Th>
-														<Th modifier="fitContent">Architectures</Th>
-														<Th modifier="fitContent">Critical</Th>
-														<Th modifier="fitContent">High</Th>
-														<Th modifier="fitContent">Medium</Th>
-														<Th modifier="fitContent">Low</Th>
-														<Th modifier="fitContent">Total</Th>
-														<Th modifier="fitContent">Fixable</Th>
-													</Tr>
-												</Thead>
-												{groupedVulnReports.map((group, groupIdx) => {
-													const isExpanded = expandedComponents.has(group.component);
-													const selectedArch =
-														activeArchTab[group.component] ?? group.reports[0]?.arch;
-													const selectedReport = group.reports.find(
-														(r) => r.arch === selectedArch,
-													);
-													return (
-														<Tbody key={group.component} isExpanded={isExpanded}>
-															<Tr>
-																<Td
-																	expand={{
-																		rowIndex: groupIdx,
-																		isExpanded,
-																		onToggle: () =>
-																			setExpandedComponents((prev) => {
-																				const next = new Set(prev);
-																				if (next.has(group.component)) {
-																					next.delete(group.component);
-																				} else {
-																					next.add(group.component);
-																				}
-																				return next;
-																			}),
-																	}}
+									<Tab
+										eventKey="securityScans"
+										title={
+											<TabTitleText>
+												Security Scans ({groupedVulnReports.length})
+											</TabTitleText>
+										}
+									>
+										<Table variant="compact">
+											<Thead>
+												<Tr>
+													<Th screenReaderText="Toggle" />
+													<Th>Component</Th>
+													<Th modifier="fitContent">Architectures</Th>
+													<Th modifier="fitContent">Critical</Th>
+													<Th modifier="fitContent">High</Th>
+													<Th modifier="fitContent">Medium</Th>
+													<Th modifier="fitContent">Low</Th>
+													<Th modifier="fitContent">Total</Th>
+													<Th modifier="fitContent">Fixable</Th>
+												</Tr>
+											</Thead>
+											{groupedVulnReports.map((group, groupIdx) => {
+												const isExpanded = expandedComponents.has(
+													group.component,
+												);
+												const selectedArch =
+													activeArchTab[group.component] ??
+													group.reports[0]?.arch;
+												const selectedReport = group.reports.find(
+													(r) => r.arch === selectedArch,
+												);
+												return (
+													<Tbody key={group.component} isExpanded={isExpanded}>
+														<Tr>
+															<Td
+																expand={{
+																	rowIndex: groupIdx,
+																	isExpanded,
+																	onToggle: () =>
+																		setExpandedComponents((prev) => {
+																			const next = new Set(prev);
+																			if (next.has(group.component)) {
+																				next.delete(group.component);
+																			} else {
+																				next.add(group.component);
+																			}
+																			return next;
+																		}),
+																}}
+															/>
+															<Td>{group.component}</Td>
+															<Td>{group.reports.length}</Td>
+															<Td>
+																<SeverityCount
+																	count={group.critical}
+																	severity="Critical"
 																/>
-																<Td>{group.component}</Td>
-																<Td>{group.reports.length}</Td>
-																<Td>
-																	<SeverityCount count={group.critical} severity="Critical" />
-																</Td>
-																<Td>
-																	<SeverityCount count={group.high} severity="High" />
-																</Td>
-																<Td>
-																	<SeverityCount count={group.medium} severity="Medium" />
-																</Td>
-																<Td>
-																	<SeverityCount count={group.low} severity="Low" />
-																</Td>
-																<Td>{group.total}</Td>
-																<Td>{group.fixable}</Td>
-															</Tr>
-															{isExpanded && selectedReport && (
-																<Tr isExpanded>
-																	<Td colSpan={9}>
-																		<ExpandableRowContent>
-																			<Tabs
-																				isFilled
-																				activeKey={selectedArch}
-																				onSelect={(_e, key) =>
-																					setActiveArchTab((prev) => ({
-																						...prev,
-																						[group.component]: String(key),
-																					}))
-																				}
-																			>
-																				{group.reports.map((rpt) => (
-																					<Tab
-																						key={rpt.arch}
-																						eventKey={rpt.arch}
-																						title={
-																							<TabTitleText>
-																								{rpt.arch} ({rpt.total})
-																							</TabTitleText>
-																						}
-																					>
-																						<div style={{ padding: "1rem 0" }}>
-																							<Flex spaceItems={{ default: "spaceItemsLg" }} style={{ marginBottom: "1rem" }}>
-																								<FlexItem>Critical: <SeverityCount count={rpt.critical} severity="Critical" /></FlexItem>
-																								<FlexItem>High: <SeverityCount count={rpt.high} severity="High" /></FlexItem>
-																								<FlexItem>Medium: <SeverityCount count={rpt.medium} severity="Medium" /></FlexItem>
-																								<FlexItem>Low: <SeverityCount count={rpt.low} severity="Low" /></FlexItem>
-																								<FlexItem>Total: {rpt.total}</FlexItem>
-																								<FlexItem>Fixable: {rpt.fixable}</FlexItem>
-																							</Flex>
-																							{rpt.vulnerabilities &&
-																							rpt.vulnerabilities.length > 0 ? (
-																								<VulnerabilitiesTable
-																									vulnerabilities={rpt.vulnerabilities}
+															</Td>
+															<Td>
+																<SeverityCount
+																	count={group.high}
+																	severity="High"
+																/>
+															</Td>
+															<Td>
+																<SeverityCount
+																	count={group.medium}
+																	severity="Medium"
+																/>
+															</Td>
+															<Td>
+																<SeverityCount
+																	count={group.low}
+																	severity="Low"
+																/>
+															</Td>
+															<Td>{group.total}</Td>
+															<Td>{group.fixable}</Td>
+														</Tr>
+														{isExpanded && selectedReport && (
+															<Tr isExpanded>
+																<Td colSpan={9}>
+																	<ExpandableRowContent>
+																		<Tabs
+																			isFilled
+																			activeKey={selectedArch}
+																			onSelect={(_e, key) =>
+																				setActiveArchTab((prev) => ({
+																					...prev,
+																					[group.component]: String(key),
+																				}))
+																			}
+																		>
+																			{group.reports.map((rpt) => (
+																				<Tab
+																					key={rpt.arch}
+																					eventKey={rpt.arch}
+																					title={
+																						<TabTitleText>
+																							{rpt.arch} ({rpt.total})
+																						</TabTitleText>
+																					}
+																				>
+																					<div style={{ padding: "1rem 0" }}>
+																						<Flex
+																							spaceItems={{
+																								default: "spaceItemsLg",
+																							}}
+																							style={{ marginBottom: "1rem" }}
+																						>
+																							<FlexItem>
+																								Critical:{" "}
+																								<SeverityCount
+																									count={rpt.critical}
+																									severity="Critical"
 																								/>
-																							) : (
-																								<em>No vulnerabilities recorded.</em>
-																							)}
-																						</div>
-																					</Tab>
-																				))}
-																			</Tabs>
-																		</ExpandableRowContent>
-																	</Td>
-																</Tr>
-															)}
-														</Tbody>
-													);
-												})}
-											</Table>
-										</Tab>
-									)}
+																							</FlexItem>
+																							<FlexItem>
+																								High:{" "}
+																								<SeverityCount
+																									count={rpt.high}
+																									severity="High"
+																								/>
+																							</FlexItem>
+																							<FlexItem>
+																								Medium:{" "}
+																								<SeverityCount
+																									count={rpt.medium}
+																									severity="Medium"
+																								/>
+																							</FlexItem>
+																							<FlexItem>
+																								Low:{" "}
+																								<SeverityCount
+																									count={rpt.low}
+																									severity="Low"
+																								/>
+																							</FlexItem>
+																							<FlexItem>
+																								Total: {rpt.total}
+																							</FlexItem>
+																							<FlexItem>
+																								Fixable: {rpt.fixable}
+																							</FlexItem>
+																						</Flex>
+																						{rpt.vulnerabilities &&
+																						rpt.vulnerabilities.length > 0 ? (
+																							<VulnerabilitiesTable
+																								vulnerabilities={
+																									rpt.vulnerabilities
+																								}
+																							/>
+																						) : (
+																							<em>
+																								No vulnerabilities recorded.
+																							</em>
+																						)}
+																					</div>
+																				</Tab>
+																			))}
+																		</Tabs>
+																	</ExpandableRowContent>
+																</Td>
+															</Tr>
+														)}
+													</Tbody>
+												);
+											})}
+										</Table>
+									</Tab>
+								)}
 							</Tabs>
 						</CardBody>
 					</Card>
@@ -569,7 +606,12 @@ function ReleaseSignal({
 
 	const progressItems = [
 		{ label: "Builds ready", done: buildsReady, warning: snapshot === null },
-		{ label: "Tests passed", done: allTestsPassed, warning: !hasTests, danger: hasTests && !allTestsPassed },
+		{
+			label: "Tests passed",
+			done: allTestsPassed,
+			warning: !hasTests,
+			danger: hasTests && !allTestsPassed,
+		},
 		...(issueSummary ? [{ label: "Bugs verified", done: bugsVerified }] : []),
 		{ label: "QE sign off", done: qeSignOff },
 	];
@@ -654,14 +696,21 @@ function ReleaseSignal({
 	);
 }
 
-const severityLabelColor: Record<string, "red" | "orange" | "yellow" | "grey"> = {
-	Critical: "red",
-	High: "red",
-	Medium: "orange",
-	Low: "yellow",
-};
+const severityLabelColor: Record<string, "red" | "orange" | "yellow" | "grey"> =
+	{
+		Critical: "red",
+		High: "red",
+		Medium: "orange",
+		Low: "yellow",
+	};
 
-function SeverityCount({ count, severity }: { count: number; severity: string }) {
+function SeverityCount({
+	count,
+	severity,
+}: {
+	count: number;
+	severity: string;
+}) {
 	if (count === 0) return <>{"\u2014"}</>;
 	return (
 		<Label color={severityLabelColor[severity] ?? "grey"} isCompact>
