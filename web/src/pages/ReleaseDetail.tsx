@@ -49,7 +49,6 @@ import type {
 	SnapshotRecord,
 	VulnerabilityReport,
 } from "../api/types";
-import ExpandableCard from "../components/ExpandableCard";
 import GitShaLink from "../components/GitShaLink";
 import PriorityLabel from "../components/PriorityLabel";
 import StatusLabel from "../components/StatusLabel";
@@ -507,9 +506,12 @@ export default function ReleaseDetail() {
 
 				{/* Bug Verification Table */}
 				{(issues ?? []).length > 0 && (
-					<ExpandableCard title={`Bug Verification (${(issues ?? []).length})`}>
-						<IssuesTable issues={issues ?? []} />
-					</ExpandableCard>
+					<Card isCompact style={{ marginBottom: "1rem" }}>
+						<CardTitle>{`Bug Verification (${(issues ?? []).length})`}</CardTitle>
+						<CardBody>
+							<IssuesTable issues={issues ?? []} />
+						</CardBody>
+					</Card>
 				)}
 			</PageSection>
 		</>
