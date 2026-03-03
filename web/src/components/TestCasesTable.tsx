@@ -32,7 +32,9 @@ const statusWeight: Record<string, number> = {
 
 export default function TestCasesTable({
 	testCases,
-}: { testCases: TestCase[] }) {
+}: {
+	testCases: TestCase[];
+}) {
 	const [activeSortIndex, setActiveSortIndex] = useState<number | undefined>(
 		undefined,
 	);
@@ -61,9 +63,7 @@ export default function TestCasesTable({
 			cases = cases.filter((tc) => tc.name.toLowerCase().includes(lower));
 		}
 		if (statusFilters.size > 0) {
-			cases = cases.filter((tc) =>
-				statusFilters.has(tc.status.toLowerCase()),
-			);
+			cases = cases.filter((tc) => statusFilters.has(tc.status.toLowerCase()));
 		}
 
 		if (activeSortIndex !== undefined && activeSortDirection !== undefined) {
@@ -84,7 +84,13 @@ export default function TestCasesTable({
 		}
 
 		return cases;
-	}, [testCases, nameFilter, statusFilters, activeSortIndex, activeSortDirection]);
+	}, [
+		testCases,
+		nameFilter,
+		statusFilters,
+		activeSortIndex,
+		activeSortDirection,
+	]);
 
 	const getSortParams = (columnIndex: number): ThProps["sort"] => ({
 		sortBy: {
