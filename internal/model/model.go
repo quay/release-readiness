@@ -52,6 +52,12 @@ type TestSuite struct {
 	TestCases   []TestCase `json:"test_cases,omitempty"`
 }
 
+type TestSuiteMeta struct {
+	ID         int64  `json:"id"`
+	SnapshotID int64  `json:"snapshot_id"`
+	Name       string `json:"name"`
+}
+
 type TestCase struct {
 	ID          int64   `json:"id"`
 	TestSuiteID int64   `json:"test_suite_id"`

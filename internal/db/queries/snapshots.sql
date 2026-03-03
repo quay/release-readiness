@@ -41,6 +41,13 @@ JOIN (
 ) counts ON s.id = counts.max_id
 ORDER BY s.application;
 
+-- name: GetSnapshotByID :one
+SELECT id, application, name, tests_passed, created_at
+FROM snapshots WHERE id = ?;
+
+-- name: GetTestSuiteByID :one
+SELECT id, snapshot_id, name FROM test_suites WHERE id = ?;
+
 -- name: CreateTestSuite :execlastid
 INSERT INTO test_suites (snapshot_id, name, status, pipeline_run, tool_name, tool_version, tests, passed, failed, skipped, pending, other, flaky, start_time, stop_time, duration_ms)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);

@@ -220,6 +220,39 @@ func (c *Client) GetClairReport(ctx context.Context, key string) (*clair.Report,
 	return &report, nil
 }
 
+// ListObjects returns all object keys under the given prefix.
+func (c *Client) ListObjects(ctx context.Context, prefix string) ([]string, error) {
+	paginator := s3.NewListObjectsV2Paginator(c.s3, &s3.ListObjectsV2Input{
+		Bucket: &c.bucket,
+		Prefix: aws.String(prefix),
+	})
+
+	var keys []string
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list objects: %w", err)
+		}
+		for _, obj := range page.Contents {
+			keys = append(keys, *obj.Key)
+		}
+	}
+	return keys, nil
+}
+
+// GetObjectStream returns a reader for the given S3 key along with the content length.
+// The caller must close the returned ReadCloser.
+func (c *Client) GetObjectStream(ctx context.Context, key string) (io.ReadCloser, int64, error) {
+	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: &c.bucket,
+		Key:    &key,
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("get %s: %w", key, err)
+	}
+	return out.Body, aws.ToInt64(out.ContentLength), nil
+}
+
 func (c *Client) getObject(ctx context.Context, key string) ([]byte, error) {
 	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: &c.bucket,

@@ -35,6 +35,27 @@ func (d *DB) SnapshotExistsByName(ctx context.Context, name string) (bool, error
 	return count > 0, nil
 }
 
+func (d *DB) GetSnapshotByID(ctx context.Context, id int64) (*model.SnapshotRecord, error) {
+	row, err := d.queries().GetSnapshotByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	s := toSnapshotRecord(row)
+	return &s, nil
+}
+
+func (d *DB) GetTestSuiteByID(ctx context.Context, id int64) (*model.TestSuiteMeta, error) {
+	row, err := d.queries().GetTestSuiteByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &model.TestSuiteMeta{
+		ID:         row.ID,
+		SnapshotID: row.SnapshotID,
+		Name:       row.Name,
+	}, nil
+}
+
 func (d *DB) GetSnapshotByName(ctx context.Context, name string) (*model.SnapshotRecord, error) {
 	row, err := d.queries().GetSnapshotRow(ctx, name)
 	if err != nil {
