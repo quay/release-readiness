@@ -82,6 +82,37 @@ CREATE TABLE IF NOT EXISTS jira_issues (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jira_issues_key_version ON jira_issues(key, fix_version);
+
+CREATE TABLE IF NOT EXISTS vulnerability_reports (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id     INTEGER NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+    component       TEXT NOT NULL,
+    arch            TEXT NOT NULL,
+    total           INTEGER NOT NULL DEFAULT 0,
+    critical        INTEGER NOT NULL DEFAULT 0,
+    high            INTEGER NOT NULL DEFAULT 0,
+    medium          INTEGER NOT NULL DEFAULT 0,
+    low             INTEGER NOT NULL DEFAULT 0,
+    unknown         INTEGER NOT NULL DEFAULT 0,
+    fixable         INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_vuln_reports_snapshot ON vulnerability_reports(snapshot_id);
+
+CREATE TABLE IF NOT EXISTS vulnerabilities (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id           INTEGER NOT NULL REFERENCES vulnerability_reports(id) ON DELETE CASCADE,
+    name                TEXT NOT NULL,
+    severity            TEXT NOT NULL DEFAULT '',
+    package_name        TEXT NOT NULL DEFAULT '',
+    package_version     TEXT NOT NULL DEFAULT '',
+    fixed_in_version    TEXT NOT NULL DEFAULT '',
+    description         TEXT NOT NULL DEFAULT '',
+    link                TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_vulns_report ON vulnerabilities(report_id);
 CREATE INDEX IF NOT EXISTS idx_jira_issues_fix_version ON jira_issues(fix_version);
 
 CREATE TABLE IF NOT EXISTS release_versions (

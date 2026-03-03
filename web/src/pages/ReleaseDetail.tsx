@@ -6,7 +6,6 @@ import {
 	CardTitle,
 	EmptyState,
 	EmptyStateBody,
-	ExpandableSection,
 	Flex,
 	FlexItem,
 	Label,
@@ -14,6 +13,9 @@ import {
 	ProgressStep,
 	ProgressStepper,
 	Spinner,
+	Tab,
+	Tabs,
+	TabTitleText,
 	Title,
 } from "@patternfly/react-core";
 import {
@@ -21,6 +23,7 @@ import {
 	ExclamationCircleIcon,
 } from "@patternfly/react-icons";
 import {
+	ExpandableRowContent,
 	Table,
 	Tbody,
 	Td,
@@ -49,6 +52,8 @@ import ExpandableCard from "../components/ExpandableCard";
 import GitShaLink from "../components/GitShaLink";
 import PriorityLabel from "../components/PriorityLabel";
 import StatusLabel from "../components/StatusLabel";
+import TestCasesTable from "../components/TestCasesTable";
+import VulnerabilitiesTable from "../components/VulnerabilitiesTable";
 import { useCachedFetch } from "../hooks/useCachedFetch";
 import { useConfig } from "../hooks/useConfig";
 import { formatReleaseName, jiraIssueUrl, quayImageUrl } from "../utils/links";
@@ -78,8 +83,15 @@ export default function ReleaseDetail() {
 		() => getReleaseReadiness(version!),
 	);
 
-	const [componentsExpanded, setComponentsExpanded] = useState(false);
-	const [testResultsExpanded, setTestResultsExpanded] = useState(false);
+	const [activeSnapshotTab, setActiveSnapshotTab] = useState<
+		string | number
+	>("components");
+	const [expandedSuites, setExpandedSuites] = useState<Set<number>>(
+		new Set(),
+	);
+	const [expandedReports, setExpandedReports] = useState<Set<number>>(
+		new Set(),
+	);
 
 	if (loadingRelease && !release) {
 		return (
@@ -179,105 +191,247 @@ export default function ReleaseDetail() {
 								</FlexItem>
 							</Flex>
 
-							{/* Components Table */}
-							{snapshot.components && snapshot.components.length > 0 && (
-								<ExpandableSection
-									toggleText={`Components (${snapshot.components.length})`}
-									isExpanded={componentsExpanded}
-									onToggle={(_e, val) => setComponentsExpanded(val)}
-									style={{ marginTop: "1rem" }}
-								>
-									<Table variant="compact">
-										<Thead>
-											<Tr>
-												<Th>Component</Th>
-												<Th>Git SHA</Th>
-												<Th>Image</Th>
-											</Tr>
-										</Thead>
-										<Tbody>
-											{snapshot.components.map((c) => {
-												const imgUrl = quayImageUrl(c.image_url);
-												const imgDisplay = c.image_url.includes("/")
-													? (c.image_url.split("/").pop()?.split("@")[0] ??
-														c.image_url)
-													: c.image_url;
-												return (
-													<Tr key={c.id}>
-														<Td>{c.component}</Td>
-														<Td>
-															<GitShaLink
-																component={c.component}
-																sha={c.git_sha}
-																gitUrl={c.git_url}
-															/>
-														</Td>
-														<Td>
-															{imgUrl ? (
-																<a
-																	href={imgUrl}
-																	target="_blank"
-																	rel="noopener noreferrer"
-																>
-																	<code style={{ fontSize: "0.85em" }}>
-																		{imgDisplay}
-																	</code>
-																</a>
-															) : (
-																<code style={{ fontSize: "0.85em" }}>
-																	{c.image_url}
-																</code>
-															)}
-														</Td>
-													</Tr>
-												);
-											})}
-										</Tbody>
-									</Table>
-								</ExpandableSection>
-							)}
-
-							{/* Test Suites Table */}
-							{snapshot.test_suites && snapshot.test_suites.length > 0 && (
-								<ExpandableSection
-									toggleText={`Test Suites (${snapshot.test_suites.length})`}
-									isExpanded={testResultsExpanded}
-									onToggle={(_e, val) => setTestResultsExpanded(val)}
-									style={{ marginTop: "1rem" }}
-								>
-									<Table variant="compact">
-										<Thead>
-											<Tr>
-												<Th>Suite</Th>
-												<Th>Status</Th>
-												<Th>Tool</Th>
-												<Th modifier="fitContent">Passed</Th>
-												<Th modifier="fitContent">Failed</Th>
-												<Th modifier="fitContent">Skipped</Th>
-												<Th modifier="fitContent">Total</Th>
-											</Tr>
-										</Thead>
-										<Tbody>
-											{snapshot.test_suites.map((ts) => (
-												<Tr key={ts.id}>
-													<Td>{ts.name}</Td>
-													<Td>
-														<StatusLabel status={ts.status} />
-													</Td>
-													<Td>
-														{ts.tool_name}
-														{ts.tool_version ? ` ${ts.tool_version}` : ""}
-													</Td>
-													<Td>{ts.tests === 0 ? "\u2014" : ts.passed}</Td>
-													<Td>{ts.tests === 0 ? "\u2014" : ts.failed}</Td>
-													<Td>{ts.tests === 0 ? "\u2014" : ts.skipped}</Td>
-													<Td>{ts.tests === 0 ? "\u2014" : ts.tests}</Td>
+							<Tabs
+								activeKey={activeSnapshotTab}
+								onSelect={(_e, key) => setActiveSnapshotTab(key)}
+								isFilled
+								style={{ marginTop: "1rem" }}
+							>
+								{snapshot.components && snapshot.components.length > 0 && (
+									<Tab
+										eventKey="components"
+										title={
+											<TabTitleText>
+												Components ({snapshot.components.length})
+											</TabTitleText>
+										}
+									>
+										<Table variant="compact">
+											<Thead>
+												<Tr>
+													<Th>Component</Th>
+													<Th>Git SHA</Th>
+													<Th>Image</Th>
 												</Tr>
-											))}
-										</Tbody>
-									</Table>
-								</ExpandableSection>
-							)}
+											</Thead>
+											<Tbody>
+												{snapshot.components.map((c) => {
+													const imgUrl = quayImageUrl(c.image_url);
+													const imgDisplay = c.image_url.includes("/")
+														? (c.image_url
+																.split("/")
+																.pop()
+																?.split("@")[0] ?? c.image_url)
+														: c.image_url;
+													return (
+														<Tr key={c.id}>
+															<Td>{c.component}</Td>
+															<Td>
+																<GitShaLink
+																	component={c.component}
+																	sha={c.git_sha}
+																	gitUrl={c.git_url}
+																/>
+															</Td>
+															<Td>
+																{imgUrl ? (
+																	<a
+																		href={imgUrl}
+																		target="_blank"
+																		rel="noopener noreferrer"
+																	>
+																		<code style={{ fontSize: "0.85em" }}>
+																			{imgDisplay}
+																		</code>
+																	</a>
+																) : (
+																	<code style={{ fontSize: "0.85em" }}>
+																		{c.image_url}
+																	</code>
+																)}
+															</Td>
+														</Tr>
+													);
+												})}
+											</Tbody>
+										</Table>
+									</Tab>
+								)}
+
+								{snapshot.test_suites &&
+									snapshot.test_suites.length > 0 && (
+										<Tab
+											eventKey="testSuites"
+											title={
+												<TabTitleText>
+													Test Suites ({snapshot.test_suites.length})
+												</TabTitleText>
+											}
+										>
+											<Table variant="compact">
+												<Thead>
+													<Tr>
+														<Th screenReaderText="Toggle" />
+														<Th>Suite</Th>
+														<Th>Status</Th>
+														<Th>Tool</Th>
+														<Th modifier="fitContent">Passed</Th>
+														<Th modifier="fitContent">Failed</Th>
+														<Th modifier="fitContent">Skipped</Th>
+														<Th modifier="fitContent">Total</Th>
+													</Tr>
+												</Thead>
+												{snapshot.test_suites.map((ts) => {
+													const isSuiteExpanded = expandedSuites.has(ts.id);
+													return (
+														<Tbody key={ts.id} isExpanded={isSuiteExpanded}>
+															<Tr>
+																<Td
+																	expand={{
+																		rowIndex: ts.id,
+																		isExpanded: isSuiteExpanded,
+																		onToggle: () =>
+																			setExpandedSuites((prev) => {
+																				const next = new Set(prev);
+																				if (next.has(ts.id)) {
+																					next.delete(ts.id);
+																				} else {
+																					next.add(ts.id);
+																				}
+																				return next;
+																			}),
+																	}}
+																/>
+																<Td>{ts.name}</Td>
+																<Td>
+																	<StatusLabel status={ts.status} />
+																</Td>
+																<Td>
+																	{ts.tool_name}
+																	{ts.tool_version
+																		? ` ${ts.tool_version}`
+																		: ""}
+																</Td>
+																<Td>
+																	{ts.tests === 0 ? "\u2014" : ts.passed}
+																</Td>
+																<Td>
+																	{ts.tests === 0 ? "\u2014" : ts.failed}
+																</Td>
+																<Td>
+																	{ts.tests === 0 ? "\u2014" : ts.skipped}
+																</Td>
+																<Td>
+																	{ts.tests === 0 ? "\u2014" : ts.tests}
+																</Td>
+															</Tr>
+															{isSuiteExpanded && (
+																<Tr isExpanded>
+																	<Td colSpan={8}>
+																		<ExpandableRowContent>
+																			{ts.test_cases &&
+																			ts.test_cases.length > 0 ? (
+																				<TestCasesTable
+																					testCases={ts.test_cases}
+																				/>
+																			) : (
+																				<em>No test cases recorded.</em>
+																			)}
+																		</ExpandableRowContent>
+																	</Td>
+																</Tr>
+															)}
+														</Tbody>
+													);
+												})}
+											</Table>
+										</Tab>
+									)}
+								{snapshot.vulnerability_reports &&
+									snapshot.vulnerability_reports.length > 0 && (
+										<Tab
+											eventKey="securityScans"
+											title={
+												<TabTitleText>
+													Security Scans ({snapshot.vulnerability_reports.length})
+												</TabTitleText>
+											}
+										>
+											<Table variant="compact">
+												<Thead>
+													<Tr>
+														<Th screenReaderText="Toggle" />
+														<Th>Component</Th>
+														<Th>Arch</Th>
+														<Th modifier="fitContent">Critical</Th>
+														<Th modifier="fitContent">High</Th>
+														<Th modifier="fitContent">Medium</Th>
+														<Th modifier="fitContent">Low</Th>
+														<Th modifier="fitContent">Total</Th>
+														<Th modifier="fitContent">Fixable</Th>
+													</Tr>
+												</Thead>
+												{snapshot.vulnerability_reports.map((rpt) => {
+													const isReportExpanded = expandedReports.has(rpt.id);
+													return (
+														<Tbody key={rpt.id} isExpanded={isReportExpanded}>
+															<Tr>
+																<Td
+																	expand={{
+																		rowIndex: rpt.id,
+																		isExpanded: isReportExpanded,
+																		onToggle: () =>
+																			setExpandedReports((prev) => {
+																				const next = new Set(prev);
+																				if (next.has(rpt.id)) {
+																					next.delete(rpt.id);
+																				} else {
+																					next.add(rpt.id);
+																				}
+																				return next;
+																			}),
+																	}}
+																/>
+																<Td>{rpt.component}</Td>
+																<Td>{rpt.arch}</Td>
+																<Td>
+																	<SeverityCount count={rpt.critical} severity="Critical" />
+																</Td>
+																<Td>
+																	<SeverityCount count={rpt.high} severity="High" />
+																</Td>
+																<Td>
+																	<SeverityCount count={rpt.medium} severity="Medium" />
+																</Td>
+																<Td>
+																	<SeverityCount count={rpt.low} severity="Low" />
+																</Td>
+																<Td>{rpt.total}</Td>
+																<Td>{rpt.fixable}</Td>
+															</Tr>
+															{isReportExpanded && (
+																<Tr isExpanded>
+																	<Td colSpan={9}>
+																		<ExpandableRowContent>
+																			{rpt.vulnerabilities &&
+																			rpt.vulnerabilities.length > 0 ? (
+																				<VulnerabilitiesTable
+																					vulnerabilities={rpt.vulnerabilities}
+																				/>
+																			) : (
+																				<em>No vulnerabilities recorded.</em>
+																			)}
+																		</ExpandableRowContent>
+																	</Td>
+																</Tr>
+															)}
+														</Tbody>
+													);
+												})}
+											</Table>
+										</Tab>
+									)}
+							</Tabs>
 						</CardBody>
 					</Card>
 				)}
@@ -344,7 +498,7 @@ function ReleaseSignal({
 
 	const progressItems = [
 		{ label: "Builds ready", done: buildsReady, warning: snapshot === null },
-		{ label: "Tests passed", done: allTestsPassed, warning: !hasTests },
+		{ label: "Tests passed", done: allTestsPassed, warning: !hasTests, danger: hasTests && !allTestsPassed },
 		...(issueSummary ? [{ label: "Bugs verified", done: bugsVerified }] : []),
 		{ label: "QE sign off", done: qeSignOff },
 	];
@@ -409,9 +563,11 @@ function ReleaseSignal({
 							variant={
 								item.done
 									? "success"
-									: item.warning
-										? "warning"
-										: "pending"
+									: item.danger
+										? "danger"
+										: item.warning
+											? "warning"
+											: "pending"
 							}
 							isCurrent={idx === firstIncomplete}
 							id={`step-${idx}`}
@@ -424,6 +580,22 @@ function ReleaseSignal({
 				</ProgressStepper>
 			</CardBody>
 		</Card>
+	);
+}
+
+const severityLabelColor: Record<string, "red" | "orange" | "yellow" | "grey"> = {
+	Critical: "red",
+	High: "red",
+	Medium: "orange",
+	Low: "yellow",
+};
+
+function SeverityCount({ count, severity }: { count: number; severity: string }) {
+	if (count === 0) return <>{"\u2014"}</>;
+	return (
+		<Label color={severityLabelColor[severity] ?? "grey"} isCompact>
+			{count}
+		</Label>
 	);
 }
 

@@ -141,6 +141,73 @@ func (q *Queries) CreateTestSuite(ctx context.Context, arg CreateTestSuiteParams
 	return result.LastInsertId()
 }
 
+const createVulnerability = `-- name: CreateVulnerability :exec
+INSERT INTO vulnerabilities (report_id, name, severity, package_name, package_version, fixed_in_version, description, link)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreateVulnerabilityParams struct {
+	ReportID       int64
+	Name           string
+	Severity       string
+	PackageName    string
+	PackageVersion string
+	FixedInVersion string
+	Description    string
+	Link           string
+}
+
+func (q *Queries) CreateVulnerability(ctx context.Context, arg CreateVulnerabilityParams) error {
+	_, err := q.db.ExecContext(ctx, createVulnerability,
+		arg.ReportID,
+		arg.Name,
+		arg.Severity,
+		arg.PackageName,
+		arg.PackageVersion,
+		arg.FixedInVersion,
+		arg.Description,
+		arg.Link,
+	)
+	return err
+}
+
+const createVulnerabilityReport = `-- name: CreateVulnerabilityReport :execlastid
+INSERT INTO vulnerability_reports (snapshot_id, component, arch, total, critical, high, medium, low, unknown, fixable)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreateVulnerabilityReportParams struct {
+	SnapshotID int64
+	Component  string
+	Arch       string
+	Total      int64
+	Critical   int64
+	High       int64
+	Medium     int64
+	Low        int64
+	Unknown    int64
+	Fixable    int64
+}
+
+func (q *Queries) CreateVulnerabilityReport(ctx context.Context, arg CreateVulnerabilityReportParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, createVulnerabilityReport,
+		arg.SnapshotID,
+		arg.Component,
+		arg.Arch,
+		arg.Total,
+		arg.Critical,
+		arg.High,
+		arg.Medium,
+		arg.Low,
+		arg.Unknown,
+		arg.Fixable,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
+}
+
 const getSnapshotRow = `-- name: GetSnapshotRow :one
 SELECT id, application, name, tests_passed, created_at
 FROM snapshots WHERE name = ?
@@ -407,6 +474,97 @@ func (q *Queries) ListTestSuitesBySnapshot(ctx context.Context, snapshotID int64
 			&i.StartTime,
 			&i.StopTime,
 			&i.DurationMs,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVulnerabilitiesByReport = `-- name: ListVulnerabilitiesByReport :many
+SELECT id, report_id, name, severity, package_name, package_version, fixed_in_version, description, link
+FROM vulnerabilities
+WHERE report_id = ?
+ORDER BY
+    CASE severity
+        WHEN 'Critical' THEN 0
+        WHEN 'High' THEN 1
+        WHEN 'Medium' THEN 2
+        WHEN 'Low' THEN 3
+        ELSE 4
+    END,
+    name
+`
+
+func (q *Queries) ListVulnerabilitiesByReport(ctx context.Context, reportID int64) ([]Vulnerability, error) {
+	rows, err := q.db.QueryContext(ctx, listVulnerabilitiesByReport, reportID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Vulnerability
+	for rows.Next() {
+		var i Vulnerability
+		if err := rows.Scan(
+			&i.ID,
+			&i.ReportID,
+			&i.Name,
+			&i.Severity,
+			&i.PackageName,
+			&i.PackageVersion,
+			&i.FixedInVersion,
+			&i.Description,
+			&i.Link,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVulnerabilityReportsBySnapshot = `-- name: ListVulnerabilityReportsBySnapshot :many
+SELECT id, snapshot_id, component, arch, total, critical, high, medium, low, unknown, fixable, created_at
+FROM vulnerability_reports
+WHERE snapshot_id = ?
+ORDER BY component, arch
+`
+
+func (q *Queries) ListVulnerabilityReportsBySnapshot(ctx context.Context, snapshotID int64) ([]VulnerabilityReport, error) {
+	rows, err := q.db.QueryContext(ctx, listVulnerabilityReportsBySnapshot, snapshotID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []VulnerabilityReport
+	for rows.Next() {
+		var i VulnerabilityReport
+		if err := rows.Scan(
+			&i.ID,
+			&i.SnapshotID,
+			&i.Component,
+			&i.Arch,
+			&i.Total,
+			&i.Critical,
+			&i.High,
+			&i.Medium,
+			&i.Low,
+			&i.Unknown,
+			&i.Fixable,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err

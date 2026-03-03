@@ -62,6 +62,19 @@ func (d *DB) GetSnapshotByName(ctx context.Context, name string) (*model.Snapsho
 	s.TestSuites = suites
 	s.HasTests = len(suites) > 0
 
+	vulnReports, err := d.ListVulnerabilityReports(ctx, s.ID)
+	if err != nil {
+		return nil, err
+	}
+	for i, rpt := range vulnReports {
+		vulns, err := d.ListVulnerabilities(ctx, rpt.ID)
+		if err != nil {
+			return nil, err
+		}
+		vulnReports[i].Vulnerabilities = vulns
+	}
+	s.VulnerabilityReports = vulnReports
+
 	return &s, nil
 }
 
@@ -232,6 +245,81 @@ func (d *DB) ListTestCases(ctx context.Context, testSuiteID int64) ([]model.Test
 		}
 	}
 	return cases, nil
+}
+
+func (d *DB) CreateVulnerabilityReport(ctx context.Context, snapshotID int64, component, arch string, total, critical, high, medium, low, unknown, fixable int) (int64, error) {
+	return d.queries().CreateVulnerabilityReport(ctx, dbsqlc.CreateVulnerabilityReportParams{
+		SnapshotID: snapshotID,
+		Component:  component,
+		Arch:       arch,
+		Total:      int64(total),
+		Critical:   int64(critical),
+		High:       int64(high),
+		Medium:     int64(medium),
+		Low:        int64(low),
+		Unknown:    int64(unknown),
+		Fixable:    int64(fixable),
+	})
+}
+
+func (d *DB) CreateVulnerability(ctx context.Context, reportID int64, name, severity, packageName, packageVersion, fixedInVersion, description, link string) error {
+	return d.queries().CreateVulnerability(ctx, dbsqlc.CreateVulnerabilityParams{
+		ReportID:       reportID,
+		Name:           name,
+		Severity:       severity,
+		PackageName:    packageName,
+		PackageVersion: packageVersion,
+		FixedInVersion: fixedInVersion,
+		Description:    description,
+		Link:           link,
+	})
+}
+
+func (d *DB) ListVulnerabilityReports(ctx context.Context, snapshotID int64) ([]model.VulnerabilityReport, error) {
+	rows, err := d.queries().ListVulnerabilityReportsBySnapshot(ctx, snapshotID)
+	if err != nil {
+		return nil, err
+	}
+	reports := make([]model.VulnerabilityReport, len(rows))
+	for i, r := range rows {
+		reports[i] = model.VulnerabilityReport{
+			ID:         r.ID,
+			SnapshotID: r.SnapshotID,
+			Component:  r.Component,
+			Arch:       r.Arch,
+			Total:      int(r.Total),
+			Critical:   int(r.Critical),
+			High:       int(r.High),
+			Medium:     int(r.Medium),
+			Low:        int(r.Low),
+			Unknown:    int(r.Unknown),
+			Fixable:    int(r.Fixable),
+			CreatedAt:  parseTime(r.CreatedAt),
+		}
+	}
+	return reports, nil
+}
+
+func (d *DB) ListVulnerabilities(ctx context.Context, reportID int64) ([]model.Vulnerability, error) {
+	rows, err := d.queries().ListVulnerabilitiesByReport(ctx, reportID)
+	if err != nil {
+		return nil, err
+	}
+	vulns := make([]model.Vulnerability, len(rows))
+	for i, r := range rows {
+		vulns[i] = model.Vulnerability{
+			ID:             r.ID,
+			ReportID:       r.ReportID,
+			Name:           r.Name,
+			Severity:       r.Severity,
+			PackageName:    r.PackageName,
+			PackageVersion: r.PackageVersion,
+			FixedInVersion: r.FixedInVersion,
+			Description:    r.Description,
+			Link:           r.Link,
+		}
+	}
+	return vulns, nil
 }
 
 func toSnapshotRecord(r dbsqlc.Snapshot) model.SnapshotRecord {

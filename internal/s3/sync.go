@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
+	"strings"
 	"time"
 
+	"github.com/quay/release-readiness/internal/clair"
 	"github.com/quay/release-readiness/internal/ctrf"
 	"github.com/quay/release-readiness/internal/model"
 )
@@ -19,6 +21,8 @@ type Store interface {
 	CreateSnapshotComponent(ctx context.Context, snapshotID int64, component, gitSHA, imageURL, gitURL string) error
 	CreateTestSuite(ctx context.Context, snapshotID int64, name, status, pipelineRun, toolName, toolVersion string, tests, passed, failed, skipped, pending, other, flaky int, startTime, stopTime, durationMs int64) (int64, error)
 	CreateTestCase(ctx context.Context, testSuiteID int64, name, status string, durationMs float64, message, trace, filePath, suite string, retries int, flaky bool) error
+	CreateVulnerabilityReport(ctx context.Context, snapshotID int64, component, arch string, total, critical, high, medium, low, unknown, fixable int) (int64, error)
+	CreateVulnerability(ctx context.Context, reportID int64, name, severity, packageName, packageVersion, fixedInVersion, description, link string) error
 }
 
 // Syncer orchestrates periodic S3 snapshot synchronisation into a Store.
@@ -176,5 +180,109 @@ func (s *Syncer) ingest(ctx context.Context, key string, snap *model.Snapshot) e
 		}
 	}
 
+	// Ingest Clair vulnerability scans.
+	if err := s.ingestScans(ctx, snapshotDir, snapshotRecord.ID); err != nil {
+		s.logger.Error("ingest scans", "snapshot", snap.Snapshot, "error", err)
+	}
+
 	return nil
+}
+
+// ingestScans fetches scan summary and clair reports from S3, persisting vulnerability data.
+func (s *Syncer) ingestScans(ctx context.Context, snapshotDir string, snapshotID int64) error {
+	summary, err := s.client.GetScanSummary(ctx, snapshotDir)
+	if err != nil {
+		return nil // scans directory may not exist
+	}
+
+	for _, entry := range summary {
+		if entry.Status != "ok" {
+			continue
+		}
+
+		reportKeys, err := s.client.ListClairReports(ctx, snapshotDir, entry.Component)
+		if err != nil {
+			s.logger.Debug("list clair reports", "component", entry.Component, "error", err)
+			continue
+		}
+
+		for _, key := range reportKeys {
+			arch := archFromKey(key)
+			report, err := s.client.GetClairReport(ctx, key)
+			if err != nil {
+				s.logger.Debug("fetch clair report", "key", key, "error", err)
+				continue
+			}
+
+			counts := countSeverities(report)
+			reportID, err := s.store.CreateVulnerabilityReport(
+				ctx, snapshotID, entry.Component, arch,
+				counts.total, counts.critical, counts.high,
+				counts.medium, counts.low, counts.unknown, counts.fixable,
+			)
+			if err != nil {
+				return fmt.Errorf("create vulnerability report %s/%s: %w", entry.Component, arch, err)
+			}
+
+			for _, v := range report.Vulnerabilities {
+				link := firstLink(v.Links)
+				if err := s.store.CreateVulnerability(
+					ctx, reportID,
+					v.Name, v.NormalizedSeverity,
+					v.Package.Name, "",
+					v.FixedInVersion, v.Description, link,
+				); err != nil {
+					return fmt.Errorf("create vulnerability %s: %w", v.Name, err)
+				}
+			}
+
+			s.logger.Info("ingested clair report",
+				"component", entry.Component, "arch", arch,
+				"vulnerabilities", counts.total)
+		}
+	}
+	return nil
+}
+
+type severityCounts struct {
+	total, critical, high, medium, low, unknown, fixable int
+}
+
+func countSeverities(report *clair.Report) severityCounts {
+	var c severityCounts
+	for _, v := range report.Vulnerabilities {
+		c.total++
+		switch v.NormalizedSeverity {
+		case "Critical":
+			c.critical++
+		case "High":
+			c.high++
+		case "Medium":
+			c.medium++
+		case "Low":
+			c.low++
+		default:
+			c.unknown++
+		}
+		if v.FixedInVersion != "" {
+			c.fixable++
+		}
+	}
+	return c
+}
+
+// archFromKey extracts the architecture from a key like ".../clair-report-amd64.json".
+func archFromKey(key string) string {
+	base := path.Base(key)                           // clair-report-amd64.json
+	base = strings.TrimPrefix(base, "clair-report-") // amd64.json
+	base = strings.TrimSuffix(base, ".json")         // amd64
+	return base
+}
+
+// firstLink returns the first whitespace-separated link from a Clair links string.
+func firstLink(links string) string {
+	if i := strings.IndexByte(links, ' '); i > 0 {
+		return links[:i]
+	}
+	return links
 }
