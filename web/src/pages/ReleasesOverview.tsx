@@ -69,9 +69,6 @@ export default function ReleasesOverview() {
 		for (const ov of overviews) {
 			seedCache(`issueSummary:${ov.release.name}`, ov.issue_summary);
 			seedCache(`readiness:${ov.release.name}`, ov.readiness);
-			if (ov.snapshot) {
-				seedCache(`snapshot:${ov.release.name}`, ov.snapshot);
-			}
 		}
 	}, [overviews]);
 
