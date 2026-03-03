@@ -9,7 +9,7 @@ import (
 var schemaSQL string
 
 func (d *DB) migrate() error {
-	if _, err := d.Exec(schemaSQL); err != nil {
+	if _, err := d.conn.Exec(schemaSQL); err != nil {
 		return fmt.Errorf("exec schema: %w", err)
 	}
 	return nil

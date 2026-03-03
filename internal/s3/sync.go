@@ -25,16 +25,20 @@ type Store interface {
 	CreateVulnerability(ctx context.Context, reportID int64, name, severity, packageName, packageVersion, fixedInVersion, description, link string) error
 }
 
+// TxFunc wraps a function in a database transaction, passing a tx-scoped Store.
+type TxFunc func(ctx context.Context, fn func(Store) error) error
+
 // Syncer orchestrates periodic S3 snapshot synchronisation into a Store.
 type Syncer struct {
 	client *Client
 	store  Store
+	withTx TxFunc
 	logger *slog.Logger
 }
 
 // NewSyncer creates a Syncer that uses client to fetch data and store to persist it.
-func NewSyncer(client *Client, store Store, logger *slog.Logger) *Syncer {
-	return &Syncer{client: client, store: store, logger: logger}
+func NewSyncer(client *Client, store Store, withTx TxFunc, logger *slog.Logger) *Syncer {
+	return &Syncer{client: client, store: store, withTx: withTx, logger: logger}
 }
 
 // Run performs an immediate sync and then repeats every interval until ctx is cancelled.
@@ -86,7 +90,10 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 
 			s.logger.Info("new snapshot", "snapshot", snap.Snapshot, "application", app)
 
-			if err := s.ingest(ctx, key, snap); err != nil {
+			if err := s.withTx(ctx, func(txStore Store) error {
+				txSyncer := &Syncer{client: s.client, store: txStore, withTx: s.withTx, logger: s.logger}
+				return txSyncer.ingest(ctx, key, snap)
+			}); err != nil {
 				s.logger.Error("ingest snapshot", "snapshot", snap.Snapshot, "error", err)
 			}
 		}

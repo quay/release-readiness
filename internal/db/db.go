@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -12,30 +13,18 @@ import (
 //go:generate sqlc generate -f ../../sqlc.yaml
 
 type DB struct {
-	*sql.DB
+	conn *sql.DB
+	dbtx dbsqlc.DBTX
 }
 
 func Open(path string) (*DB, error) {
-	sqlDB, err := sql.Open("sqlite", path)
+	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode%%3DWAL&_pragma=foreign_keys%%3DON&_pragma=busy_timeout%%3D5000&_pragma=synchronous%%3DNORMAL", path)
+	sqlDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
-	// SQLite pragmas for performance and correctness
-	pragmas := []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA foreign_keys=ON",
-		"PRAGMA busy_timeout=5000",
-		"PRAGMA synchronous=NORMAL",
-	}
-	for _, p := range pragmas {
-		if _, err := sqlDB.Exec(p); err != nil {
-			_ = sqlDB.Close()
-			return nil, fmt.Errorf("exec pragma %q: %w", p, err)
-		}
-	}
-
-	db := &DB{sqlDB}
+	db := &DB{conn: sqlDB, dbtx: sqlDB}
 	if err := db.migrate(); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
@@ -44,8 +33,32 @@ func Open(path string) (*DB, error) {
 	return db, nil
 }
 
+func (d *DB) Close() error {
+	return d.conn.Close()
+}
+
+func (d *DB) Ping() error {
+	return d.conn.Ping()
+}
+
+// InTx runs fn inside a database transaction. The fn receives a tx-scoped *DB
+// whose queries all run on the same transaction.
+func (d *DB) InTx(ctx context.Context, fn func(*DB) error) error {
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	txDB := &DB{conn: d.conn, dbtx: tx}
+	if err := fn(txDB); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (d *DB) queries() *dbsqlc.Queries {
-	return dbsqlc.New(d.DB)
+	return dbsqlc.New(d.dbtx)
 }
 
 func parseTime(s string) time.Time {

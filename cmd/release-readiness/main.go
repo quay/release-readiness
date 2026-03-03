@@ -67,7 +67,12 @@ func main() {
 			os.Exit(1)
 		}
 		logger.Info("s3 sync enabled", "bucket", *s3Bucket, "endpoint", *s3Endpoint, "interval", *s3PollInterval)
-		syncer := s3client.NewSyncer(s3c, database, s3Log)
+		s3Tx := func(ctx context.Context, fn func(s3client.Store) error) error {
+			return database.InTx(ctx, func(txDB *db.DB) error {
+				return fn(txDB)
+			})
+		}
+		syncer := s3client.NewSyncer(s3c, database, s3Tx, s3Log)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -85,7 +90,12 @@ func main() {
 		})
 		jiraLog := logger.With("component", "jira-sync")
 		logger.Info("jira sync enabled", "url", *jiraURL, "project", *jiraProject, "interval", *jiraPollInterval)
-		syncer := jira.NewSyncer(jiraClient, database, jiraLog)
+		jiraTx := func(ctx context.Context, fn func(jira.Store) error) error {
+			return database.InTx(ctx, func(txDB *db.DB) error {
+				return fn(txDB)
+			})
+		}
+		syncer := jira.NewSyncer(jiraClient, database, jiraTx, jiraLog)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
