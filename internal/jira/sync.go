@@ -18,16 +18,20 @@ type Store interface {
 	ListActiveReleaseVersions(ctx context.Context) ([]model.ReleaseVersion, error)
 }
 
+// TxFunc wraps a function in a database transaction, passing a tx-scoped Store.
+type TxFunc func(ctx context.Context, fn func(Store) error) error
+
 // Syncer orchestrates periodic JIRA synchronisation into a Store.
 type Syncer struct {
 	client *Client
 	store  Store
+	withTx TxFunc
 	logger *slog.Logger
 }
 
 // NewSyncer creates a Syncer that uses client to fetch data and store to persist it.
-func NewSyncer(client *Client, store Store, logger *slog.Logger) *Syncer {
-	return &Syncer{client: client, store: store, logger: logger}
+func NewSyncer(client *Client, store Store, withTx TxFunc, logger *slog.Logger) *Syncer {
+	return &Syncer{client: client, store: store, withTx: withTx, logger: logger}
 }
 
 // Run performs an immediate sync and then repeats every interval until ctx is cancelled.
@@ -133,48 +137,54 @@ func (s *Syncer) syncVersion(ctx context.Context, fixVersion string) {
 		return
 	}
 
-	var keys []string
-	for _, issue := range issues {
-		keys = append(keys, issue.Key)
+	if err := s.withTx(ctx, func(txStore Store) error {
+		var keys []string
+		for _, issue := range issues {
+			keys = append(keys, issue.Key)
 
-		labels := strings.Join(issue.Fields.Labels, ",")
-		assignee := ""
-		if issue.Fields.Assignee != nil {
-			assignee = issue.Fields.Assignee.DisplayName
+			labels := strings.Join(issue.Fields.Labels, ",")
+			assignee := ""
+			if issue.Fields.Assignee != nil {
+				assignee = issue.Fields.Assignee.DisplayName
+			}
+			resolution := ""
+			if issue.Fields.Resolution != nil {
+				resolution = issue.Fields.Resolution.Name
+			}
+
+			updatedAt, _ := time.Parse("2006-01-02T15:04:05.000-0700", issue.Fields.Updated)
+			if updatedAt.IsZero() {
+				updatedAt = time.Now().UTC()
+			}
+
+			jiraURL := fmt.Sprintf("%s/browse/%s", s.client.BaseURL(), issue.Key)
+
+			record := &model.JiraIssueRecord{
+				Key:        issue.Key,
+				Summary:    issue.Fields.Summary,
+				Status:     issue.Fields.Status.Name,
+				Priority:   issue.Fields.Priority.Name,
+				Labels:     labels,
+				FixVersion: fixVersion,
+				Assignee:   assignee,
+				IssueType:  issue.Fields.IssueType.Name,
+				Resolution: resolution,
+				Link:       jiraURL,
+				UpdatedAt:  updatedAt,
+			}
+
+			if err := txStore.UpsertJiraIssue(ctx, record); err != nil {
+				return fmt.Errorf("upsert issue %s: %w", issue.Key, err)
+			}
 		}
-		resolution := ""
-		if issue.Fields.Resolution != nil {
-			resolution = issue.Fields.Resolution.Name
+
+		if err := txStore.DeleteJiraIssuesNotIn(ctx, fixVersion, keys); err != nil {
+			return fmt.Errorf("cleanup issues: %w", err)
 		}
-
-		updatedAt, _ := time.Parse("2006-01-02T15:04:05.000-0700", issue.Fields.Updated)
-		if updatedAt.IsZero() {
-			updatedAt = time.Now().UTC()
-		}
-
-		jiraURL := fmt.Sprintf("%s/browse/%s", s.client.BaseURL(), issue.Key)
-
-		record := &model.JiraIssueRecord{
-			Key:        issue.Key,
-			Summary:    issue.Fields.Summary,
-			Status:     issue.Fields.Status.Name,
-			Priority:   issue.Fields.Priority.Name,
-			Labels:     labels,
-			FixVersion: fixVersion,
-			Assignee:   assignee,
-			IssueType:  issue.Fields.IssueType.Name,
-			Resolution: resolution,
-			Link:       jiraURL,
-			UpdatedAt:  updatedAt,
-		}
-
-		if err := s.store.UpsertJiraIssue(ctx, record); err != nil {
-			s.logger.Error("upsert issue", "key", issue.Key, "error", err)
-		}
-	}
-
-	if err := s.store.DeleteJiraIssuesNotIn(ctx, fixVersion, keys); err != nil {
-		s.logger.Error("cleanup issues", "version", fixVersion, "error", err)
+		return nil
+	}); err != nil {
+		s.logger.Error("sync version", "version", fixVersion, "error", err)
+		return
 	}
 
 	s.logger.Info("synced issues", "count", len(issues), "version", fixVersion)

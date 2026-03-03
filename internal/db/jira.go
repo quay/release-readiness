@@ -46,7 +46,7 @@ func (d *DB) ListJiraIssues(ctx context.Context, fixVersion string, issueType, s
 	}
 	query += ` ORDER BY key`
 
-	rows, err := d.QueryContext(ctx, query, args...)
+	rows, err := d.dbtx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +106,7 @@ func (d *DB) GetIssueSummariesBatch(ctx context.Context, fixVersions []string) (
 		WHERE fix_version IN (` + strings.Join(placeholders, ",") + `)
 		GROUP BY fix_version`
 
-	rows, err := d.QueryContext(ctx, query, args...)
+	rows, err := d.dbtx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +195,7 @@ func (d *DB) DeleteJiraIssuesNotIn(ctx context.Context, fixVersion string, keys 
 		args = append(args, k)
 	}
 	query := `DELETE FROM jira_issues WHERE fix_version = ? AND key NOT IN (` + strings.Join(placeholders, ",") + `)`
-	_, err := d.ExecContext(ctx, query, args...)
+	_, err := d.dbtx.ExecContext(ctx, query, args...)
 	return err
 }
 
