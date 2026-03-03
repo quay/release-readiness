@@ -47,6 +47,7 @@ import type {
 	ReadinessResponse,
 	ReleaseVersion,
 	SnapshotRecord,
+	VulnerabilityReport,
 } from "../api/types";
 import ExpandableCard from "../components/ExpandableCard";
 import GitShaLink from "../components/GitShaLink";
@@ -89,9 +90,40 @@ export default function ReleaseDetail() {
 	const [expandedSuites, setExpandedSuites] = useState<Set<number>>(
 		new Set(),
 	);
-	const [expandedReports, setExpandedReports] = useState<Set<number>>(
+	const [expandedComponents, setExpandedComponents] = useState<Set<string>>(
 		new Set(),
 	);
+	const [activeArchTab, setActiveArchTab] = useState<Record<string, string>>(
+		{},
+	);
+
+	const groupedVulnReports = useMemo(() => {
+		const reports = snapshot?.vulnerability_reports;
+		if (!reports || reports.length === 0) return [];
+
+		const map = new Map<string, VulnerabilityReport[]>();
+		for (const rpt of reports) {
+			const existing = map.get(rpt.component);
+			if (existing) {
+				existing.push(rpt);
+			} else {
+				map.set(rpt.component, [rpt]);
+			}
+		}
+
+		return [...map.entries()]
+			.map(([component, compReports]) => ({
+				component,
+				reports: compReports.sort((a, b) => a.arch.localeCompare(b.arch)),
+				total: compReports.reduce((s, r) => s + r.total, 0),
+				critical: compReports.reduce((s, r) => s + r.critical, 0),
+				high: compReports.reduce((s, r) => s + r.high, 0),
+				medium: compReports.reduce((s, r) => s + r.medium, 0),
+				low: compReports.reduce((s, r) => s + r.low, 0),
+				fixable: compReports.reduce((s, r) => s + r.fixable, 0),
+			}))
+			.sort((a, b) => a.component.localeCompare(b.component));
+	}, [snapshot?.vulnerability_reports]);
 
 	if (loadingRelease && !release) {
 		return (
@@ -347,13 +379,12 @@ export default function ReleaseDetail() {
 											</Table>
 										</Tab>
 									)}
-								{snapshot.vulnerability_reports &&
-									snapshot.vulnerability_reports.length > 0 && (
+								{groupedVulnReports.length > 0 && (
 										<Tab
 											eventKey="securityScans"
 											title={
 												<TabTitleText>
-													Security Scans ({snapshot.vulnerability_reports.length})
+													Security Scans ({groupedVulnReports.length})
 												</TabTitleText>
 											}
 										>
@@ -362,7 +393,7 @@ export default function ReleaseDetail() {
 													<Tr>
 														<Th screenReaderText="Toggle" />
 														<Th>Component</Th>
-														<Th>Arch</Th>
+														<Th modifier="fitContent">Architectures</Th>
 														<Th modifier="fitContent">Critical</Th>
 														<Th modifier="fitContent">High</Th>
 														<Th modifier="fitContent">Medium</Th>
@@ -371,56 +402,94 @@ export default function ReleaseDetail() {
 														<Th modifier="fitContent">Fixable</Th>
 													</Tr>
 												</Thead>
-												{snapshot.vulnerability_reports.map((rpt) => {
-													const isReportExpanded = expandedReports.has(rpt.id);
+												{groupedVulnReports.map((group, groupIdx) => {
+													const isExpanded = expandedComponents.has(group.component);
+													const selectedArch =
+														activeArchTab[group.component] ?? group.reports[0]?.arch;
+													const selectedReport = group.reports.find(
+														(r) => r.arch === selectedArch,
+													);
 													return (
-														<Tbody key={rpt.id} isExpanded={isReportExpanded}>
+														<Tbody key={group.component} isExpanded={isExpanded}>
 															<Tr>
 																<Td
 																	expand={{
-																		rowIndex: rpt.id,
-																		isExpanded: isReportExpanded,
+																		rowIndex: groupIdx,
+																		isExpanded,
 																		onToggle: () =>
-																			setExpandedReports((prev) => {
+																			setExpandedComponents((prev) => {
 																				const next = new Set(prev);
-																				if (next.has(rpt.id)) {
-																					next.delete(rpt.id);
+																				if (next.has(group.component)) {
+																					next.delete(group.component);
 																				} else {
-																					next.add(rpt.id);
+																					next.add(group.component);
 																				}
 																				return next;
 																			}),
 																	}}
 																/>
-																<Td>{rpt.component}</Td>
-																<Td>{rpt.arch}</Td>
+																<Td>{group.component}</Td>
+																<Td>{group.reports.length}</Td>
 																<Td>
-																	<SeverityCount count={rpt.critical} severity="Critical" />
+																	<SeverityCount count={group.critical} severity="Critical" />
 																</Td>
 																<Td>
-																	<SeverityCount count={rpt.high} severity="High" />
+																	<SeverityCount count={group.high} severity="High" />
 																</Td>
 																<Td>
-																	<SeverityCount count={rpt.medium} severity="Medium" />
+																	<SeverityCount count={group.medium} severity="Medium" />
 																</Td>
 																<Td>
-																	<SeverityCount count={rpt.low} severity="Low" />
+																	<SeverityCount count={group.low} severity="Low" />
 																</Td>
-																<Td>{rpt.total}</Td>
-																<Td>{rpt.fixable}</Td>
+																<Td>{group.total}</Td>
+																<Td>{group.fixable}</Td>
 															</Tr>
-															{isReportExpanded && (
+															{isExpanded && selectedReport && (
 																<Tr isExpanded>
 																	<Td colSpan={9}>
 																		<ExpandableRowContent>
-																			{rpt.vulnerabilities &&
-																			rpt.vulnerabilities.length > 0 ? (
-																				<VulnerabilitiesTable
-																					vulnerabilities={rpt.vulnerabilities}
-																				/>
-																			) : (
-																				<em>No vulnerabilities recorded.</em>
-																			)}
+																			<Tabs
+																				isFilled
+																				activeKey={selectedArch}
+																				onSelect={(_e, key) =>
+																					setActiveArchTab((prev) => ({
+																						...prev,
+																						[group.component]: String(key),
+																					}))
+																				}
+																			>
+																				{group.reports.map((rpt) => (
+																					<Tab
+																						key={rpt.arch}
+																						eventKey={rpt.arch}
+																						title={
+																							<TabTitleText>
+																								{rpt.arch} ({rpt.total})
+																							</TabTitleText>
+																						}
+																					>
+																						<div style={{ padding: "1rem 0" }}>
+																							<Flex spaceItems={{ default: "spaceItemsLg" }} style={{ marginBottom: "1rem" }}>
+																								<FlexItem>Critical: <SeverityCount count={rpt.critical} severity="Critical" /></FlexItem>
+																								<FlexItem>High: <SeverityCount count={rpt.high} severity="High" /></FlexItem>
+																								<FlexItem>Medium: <SeverityCount count={rpt.medium} severity="Medium" /></FlexItem>
+																								<FlexItem>Low: <SeverityCount count={rpt.low} severity="Low" /></FlexItem>
+																								<FlexItem>Total: {rpt.total}</FlexItem>
+																								<FlexItem>Fixable: {rpt.fixable}</FlexItem>
+																							</Flex>
+																							{rpt.vulnerabilities &&
+																							rpt.vulnerabilities.length > 0 ? (
+																								<VulnerabilitiesTable
+																									vulnerabilities={rpt.vulnerabilities}
+																								/>
+																							) : (
+																								<em>No vulnerabilities recorded.</em>
+																							)}
+																						</div>
+																					</Tab>
+																				))}
+																			</Tabs>
 																		</ExpandableRowContent>
 																	</Td>
 																</Tr>
