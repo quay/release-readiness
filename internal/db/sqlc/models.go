@@ -90,3 +90,30 @@ type TestSuite struct {
 	DurationMs  int64
 	CreatedAt   string
 }
+
+type Vulnerability struct {
+	ID             int64
+	ReportID       int64
+	Name           string
+	Severity       string
+	PackageName    string
+	PackageVersion string
+	FixedInVersion string
+	Description    string
+	Link           string
+}
+
+type VulnerabilityReport struct {
+	ID         int64
+	SnapshotID int64
+	Component  string
+	Arch       string
+	Total      int64
+	Critical   int64
+	High       int64
+	Medium     int64
+	Low        int64
+	Unknown    int64
+	Fixable    int64
+	CreatedAt  string
+}

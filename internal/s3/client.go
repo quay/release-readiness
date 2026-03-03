@@ -14,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
+	"github.com/quay/release-readiness/internal/clair"
 	"github.com/quay/release-readiness/internal/ctrf"
 	"github.com/quay/release-readiness/internal/konflux"
 	"github.com/quay/release-readiness/internal/model"
@@ -166,6 +167,55 @@ func (c *Client) GetCTRFReport(ctx context.Context, key string) (*ctrf.Report, e
 	var report ctrf.Report
 	if err := json.Unmarshal(data, &report); err != nil {
 		return nil, fmt.Errorf("decode ctrf report %s: %w", key, err)
+	}
+	return &report, nil
+}
+
+// GetScanSummary fetches and parses the scans/summary.json file from a snapshot directory.
+func (c *Client) GetScanSummary(ctx context.Context, snapshotDir string) ([]clair.ScanSummaryEntry, error) {
+	key := snapshotDir + "scans/summary.json"
+	data, err := c.getObject(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	var entries []clair.ScanSummaryEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil, fmt.Errorf("decode scan summary %s: %w", key, err)
+	}
+	return entries, nil
+}
+
+// ListClairReports returns the architecture suffixes for clair reports under
+// {snapshotDir}scans/{component}/ by matching clair-report-*.json keys.
+func (c *Client) ListClairReports(ctx context.Context, snapshotDir, component string) ([]string, error) {
+	prefix := snapshotDir + "scans/" + component + "/clair-report-"
+	paginator := s3.NewListObjectsV2Paginator(c.s3, &s3.ListObjectsV2Input{
+		Bucket: &c.bucket,
+		Prefix: aws.String(prefix),
+	})
+
+	var keys []string
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list clair reports: %w", err)
+		}
+		for _, obj := range page.Contents {
+			keys = append(keys, *obj.Key)
+		}
+	}
+	return keys, nil
+}
+
+// GetClairReport fetches and parses a single Clair vulnerability report from S3.
+func (c *Client) GetClairReport(ctx context.Context, key string) (*clair.Report, error) {
+	data, err := c.getObject(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	var report clair.Report
+	if err := json.Unmarshal(data, &report); err != nil {
+		return nil, fmt.Errorf("decode clair report %s: %w", key, err)
 	}
 	return &report, nil
 }

@@ -43,6 +43,34 @@ export interface TestSuite {
 	test_cases?: TestCase[];
 }
 
+export interface Vulnerability {
+	id: number;
+	report_id: number;
+	name: string;
+	severity: string;
+	package_name: string;
+	package_version: string;
+	fixed_in_version: string;
+	description: string;
+	link: string;
+}
+
+export interface VulnerabilityReport {
+	id: number;
+	snapshot_id: number;
+	component: string;
+	arch: string;
+	total: number;
+	critical: number;
+	high: number;
+	medium: number;
+	low: number;
+	unknown: number;
+	fixable: number;
+	created_at: string;
+	vulnerabilities?: Vulnerability[];
+}
+
 export interface SnapshotRecord {
 	id: number;
 	application: string;
@@ -52,6 +80,7 @@ export interface SnapshotRecord {
 	created_at: string;
 	components?: ComponentRecord[];
 	test_suites?: TestSuite[];
+	vulnerability_reports?: VulnerabilityReport[];
 }
 
 export interface JiraIssue {

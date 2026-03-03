@@ -60,3 +60,31 @@ SELECT id, test_suite_id, name, status, duration_ms, message, trace, file_path, 
 FROM test_cases
 WHERE test_suite_id = ?
 ORDER BY name;
+
+-- name: CreateVulnerabilityReport :execlastid
+INSERT INTO vulnerability_reports (snapshot_id, component, arch, total, critical, high, medium, low, unknown, fixable)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: CreateVulnerability :exec
+INSERT INTO vulnerabilities (report_id, name, severity, package_name, package_version, fixed_in_version, description, link)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: ListVulnerabilityReportsBySnapshot :many
+SELECT id, snapshot_id, component, arch, total, critical, high, medium, low, unknown, fixable, created_at
+FROM vulnerability_reports
+WHERE snapshot_id = ?
+ORDER BY component, arch;
+
+-- name: ListVulnerabilitiesByReport :many
+SELECT id, report_id, name, severity, package_name, package_version, fixed_in_version, description, link
+FROM vulnerabilities
+WHERE report_id = ?
+ORDER BY
+    CASE severity
+        WHEN 'Critical' THEN 0
+        WHEN 'High' THEN 1
+        WHEN 'Medium' THEN 2
+        WHEN 'Low' THEN 3
+        ELSE 4
+    END,
+    name;
