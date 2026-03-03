@@ -208,6 +208,24 @@ func (q *Queries) CreateVulnerabilityReport(ctx context.Context, arg CreateVulne
 	return result.LastInsertId()
 }
 
+const getSnapshotByID = `-- name: GetSnapshotByID :one
+SELECT id, application, name, tests_passed, created_at
+FROM snapshots WHERE id = ?
+`
+
+func (q *Queries) GetSnapshotByID(ctx context.Context, id int64) (Snapshot, error) {
+	row := q.db.QueryRowContext(ctx, getSnapshotByID, id)
+	var i Snapshot
+	err := row.Scan(
+		&i.ID,
+		&i.Application,
+		&i.Name,
+		&i.TestsPassed,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getSnapshotRow = `-- name: GetSnapshotRow :one
 SELECT id, application, name, tests_passed, created_at
 FROM snapshots WHERE name = ?
@@ -223,6 +241,23 @@ func (q *Queries) GetSnapshotRow(ctx context.Context, name string) (Snapshot, er
 		&i.TestsPassed,
 		&i.CreatedAt,
 	)
+	return i, err
+}
+
+const getTestSuiteByID = `-- name: GetTestSuiteByID :one
+SELECT id, snapshot_id, name FROM test_suites WHERE id = ?
+`
+
+type GetTestSuiteByIDRow struct {
+	ID         int64
+	SnapshotID int64
+	Name       string
+}
+
+func (q *Queries) GetTestSuiteByID(ctx context.Context, id int64) (GetTestSuiteByIDRow, error) {
+	row := q.db.QueryRowContext(ctx, getTestSuiteByID, id)
+	var i GetTestSuiteByIDRow
+	err := row.Scan(&i.ID, &i.SnapshotID, &i.Name)
 	return i, err
 }
 

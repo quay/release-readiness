@@ -1,6 +1,7 @@
 import {
 	Breadcrumb,
 	BreadcrumbItem,
+	Button,
 	Card,
 	CardBody,
 	CardTitle,
@@ -17,9 +18,11 @@ import {
 	Tabs,
 	TabTitleText,
 	Title,
+	Tooltip,
 } from "@patternfly/react-core";
 import {
 	CheckCircleIcon,
+	DownloadIcon,
 	ExclamationCircleIcon,
 } from "@patternfly/react-icons";
 import {
@@ -35,6 +38,7 @@ import {
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
+	downloadSuiteArtifacts,
 	getRelease,
 	getReleaseIssueSummary,
 	getReleaseReadiness,
@@ -305,6 +309,7 @@ export default function ReleaseDetail() {
 													<Th modifier="fitContent">Failed</Th>
 													<Th modifier="fitContent">Skipped</Th>
 													<Th modifier="fitContent">Total</Th>
+													<Th screenReaderText="Actions" />
 												</Tr>
 											</Thead>
 											{snapshot.test_suites.map((ts) => {
@@ -340,10 +345,27 @@ export default function ReleaseDetail() {
 															<Td>{ts.tests === 0 ? "\u2014" : ts.failed}</Td>
 															<Td>{ts.tests === 0 ? "\u2014" : ts.skipped}</Td>
 															<Td>{ts.tests === 0 ? "\u2014" : ts.tests}</Td>
+															<Td modifier="fitContent">
+																<Tooltip content="Download artifacts">
+																	<Button
+																		variant="plain"
+																		aria-label="Download artifacts"
+																		style={{ padding: 0 }}
+																		onClick={() =>
+																			downloadSuiteArtifacts(
+																				snapshot.id,
+																				ts.id,
+																			)
+																		}
+																	>
+																		<DownloadIcon />
+																	</Button>
+																</Tooltip>
+															</Td>
 														</Tr>
 														{isSuiteExpanded && (
 															<Tr isExpanded>
-																<Td colSpan={8}>
+																<Td colSpan={9}>
 																	<ExpandableRowContent>
 																		{ts.test_cases &&
 																		ts.test_cases.length > 0 ? (
