@@ -188,8 +188,8 @@ func (q *Queries) ListAllReleaseVersions(ctx context.Context) ([]ListAllReleaseV
 }
 
 const upsertJiraIssue = `-- name: UpsertJiraIssue :exec
-INSERT INTO jira_issues (key, summary, status, priority, labels, fix_version, assignee, issue_type, resolution, link, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO jira_issues (key, summary, status, priority, labels, fix_version, assignee, issue_type, resolution, link, qa_contact, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(key, fix_version) DO UPDATE SET
     summary=excluded.summary,
     status=excluded.status,
@@ -199,6 +199,7 @@ ON CONFLICT(key, fix_version) DO UPDATE SET
     issue_type=excluded.issue_type,
     resolution=excluded.resolution,
     link=excluded.link,
+    qa_contact=excluded.qa_contact,
     updated_at=excluded.updated_at
 `
 
@@ -213,6 +214,7 @@ type UpsertJiraIssueParams struct {
 	IssueType  string
 	Resolution string
 	Link       string
+	QaContact  string
 	UpdatedAt  string
 }
 
@@ -228,6 +230,7 @@ func (q *Queries) UpsertJiraIssue(ctx context.Context, arg UpsertJiraIssueParams
 		arg.IssueType,
 		arg.Resolution,
 		arg.Link,
+		arg.QaContact,
 		arg.UpdatedAt,
 	)
 	return err

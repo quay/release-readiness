@@ -94,6 +94,7 @@ export interface JiraIssue {
 	issue_type: string;
 	resolution: string;
 	link: string;
+	qa_contact: string;
 	updated_at: string;
 }
 

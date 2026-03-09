@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS jira_issues (
     issue_type  TEXT NOT NULL DEFAULT '',
     resolution  TEXT NOT NULL DEFAULT '',
     link        TEXT NOT NULL DEFAULT '',
+    qa_contact  TEXT NOT NULL DEFAULT '',
     updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
 

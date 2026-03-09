@@ -10,9 +10,13 @@ import {
 	Flex,
 	FlexItem,
 	Label,
+	MenuToggle,
 	PageSection,
 	ProgressStep,
 	ProgressStepper,
+	Select,
+	SelectList,
+	SelectOption,
 	Spinner,
 	Tab,
 	Tabs,
@@ -352,10 +356,7 @@ export default function ReleaseDetail() {
 																		aria-label="Download artifacts"
 																		style={{ padding: 0 }}
 																		onClick={() =>
-																			downloadSuiteArtifacts(
-																				snapshot.id,
-																				ts.id,
-																			)
+																			downloadSuiteArtifacts(snapshot.id, ts.id)
 																		}
 																	>
 																		<DownloadIcon />
@@ -563,15 +564,7 @@ export default function ReleaseDetail() {
 					</Card>
 				)}
 
-				{/* Bug Verification Table */}
-				{(issues ?? []).length > 0 && (
-					<Card isCompact style={{ marginBottom: "1rem" }}>
-						<CardTitle>{`Bug Verification (${(issues ?? []).length})`}</CardTitle>
-						<CardBody>
-							<IssuesTable issues={issues ?? []} />
-						</CardBody>
-					</Card>
-				)}
+				{(issues ?? []).length > 0 && <IssuesCard issues={issues ?? []} />}
 			</PageSection>
 		</>
 	);
@@ -750,6 +743,68 @@ const priorityWeight: Record<string, number> = {
 	undefined: 5,
 };
 
+function IssuesCard({ issues }: { issues: JiraIssue[] }) {
+	const [typeFilter, setTypeFilter] = useState<string>("All");
+	const [typeSelectOpen, setTypeSelectOpen] = useState(false);
+
+	const issueTypes = useMemo(() => {
+		const types = new Set(issues.map((i) => i.issue_type));
+		return ["All", ...Array.from(types).sort()];
+	}, [issues]);
+
+	const filteredIssues = useMemo(
+		() =>
+			typeFilter === "All"
+				? issues
+				: issues.filter((i) => i.issue_type === typeFilter),
+		[issues, typeFilter],
+	);
+
+	return (
+		<Card isCompact style={{ marginBottom: "1rem" }}>
+			<CardTitle>
+				<Flex
+					justifyContent={{ default: "justifyContentSpaceBetween" }}
+					alignItems={{ default: "alignItemsCenter" }}
+				>
+					<FlexItem>{`Linked Issues (${filteredIssues.length})`}</FlexItem>
+					<FlexItem>
+						<Select
+							isOpen={typeSelectOpen}
+							selected={typeFilter}
+							onSelect={(_e, value) => {
+								setTypeFilter(value as string);
+								setTypeSelectOpen(false);
+							}}
+							onOpenChange={setTypeSelectOpen}
+							toggle={(toggleRef) => (
+								<MenuToggle
+									ref={toggleRef}
+									onClick={() => setTypeSelectOpen((prev) => !prev)}
+									isExpanded={typeSelectOpen}
+								>
+									Type: {typeFilter}
+								</MenuToggle>
+							)}
+						>
+							<SelectList>
+								{issueTypes.map((t) => (
+									<SelectOption key={t} value={t}>
+										{t}
+									</SelectOption>
+								))}
+							</SelectList>
+						</Select>
+					</FlexItem>
+				</Flex>
+			</CardTitle>
+			<CardBody>
+				<IssuesTable issues={filteredIssues} />
+			</CardBody>
+		</Card>
+	);
+}
+
 function IssuesTable({ issues }: { issues: JiraIssue[] }) {
 	const [activeSortIndex, setActiveSortIndex] = useState<number | undefined>(
 		undefined,
@@ -778,6 +833,9 @@ function IssuesTable({ issues }: { issues: JiraIssue[] }) {
 					break;
 				case 5: // Assignee
 					cmp = a.assignee.localeCompare(b.assignee);
+					break;
+				case 6: // QA Contact
+					cmp = a.qa_contact.localeCompare(b.qa_contact);
 					break;
 			}
 			return activeSortDirection === "asc" ? cmp : -cmp;
@@ -817,11 +875,11 @@ function IssuesTable({ issues }: { issues: JiraIssue[] }) {
 					>
 						Status
 					</Th>
-					<Th
-						sort={getSortParams(5)}
-						style={{ whiteSpace: "nowrap", minWidth: "140px" }}
-					>
+					<Th sort={getSortParams(5)} style={{ whiteSpace: "nowrap" }}>
 						Assignee
+					</Th>
+					<Th sort={getSortParams(6)} style={{ whiteSpace: "nowrap" }}>
+						QA Contact
 					</Th>
 				</Tr>
 			</Thead>
@@ -844,6 +902,7 @@ function IssuesTable({ issues }: { issues: JiraIssue[] }) {
 							<StatusLabel status={issue.status} />
 						</Td>
 						<Td>{issue.assignee}</Td>
+						<Td>{issue.qa_contact}</Td>
 					</Tr>
 				))}
 			</Tbody>

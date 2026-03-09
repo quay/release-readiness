@@ -119,6 +119,7 @@ type JiraIssueRecord struct {
 	IssueType  string    `json:"issue_type"`
 	Resolution string    `json:"resolution"`
 	Link       string    `json:"link"`
+	QAContact  string    `json:"qa_contact"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 

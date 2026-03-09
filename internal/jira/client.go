@@ -21,6 +21,7 @@ type Config struct {
 	Token              string // Personal Access Token (Server) or API token (Cloud)
 	Project            string // e.g. PROJQUAY
 	TargetVersionField string // custom field name for Target Version (e.g. customfield_12319940)
+	QAContactField     string // custom field name for QA Contact (e.g. customfield_12315948)
 }
 
 // Client is a JIRA REST API client.
@@ -29,6 +30,7 @@ type Client struct {
 	token              string
 	project            string
 	targetVersionField string
+	qaContactField     string
 	httpClient         *http.Client
 	minDelay           time.Duration // minimum delay between requests
 }
@@ -40,6 +42,7 @@ func New(cfg Config) *Client {
 		token:              cfg.Token,
 		project:            cfg.Project,
 		targetVersionField: cfg.TargetVersionField,
+		qaContactField:     cfg.QAContactField,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -49,23 +52,35 @@ func New(cfg Config) *Client {
 
 // Issue represents a JIRA issue from the REST API.
 type Issue struct {
-	Key    string      `json:"key"`
-	Fields IssueFields `json:"fields"`
+	Key       string      `json:"key"`
+	Fields    IssueFields `json:"fields"`
+	QAContact string      `json:"-"`
 }
 
 // IssueFields holds the fields we care about from a JIRA issue.
 type IssueFields struct {
-	Summary     string           `json:"summary"`
-	Status      StatusField      `json:"status"`
-	Priority    PriorityField    `json:"priority"`
-	Labels      []string         `json:"labels"`
-	FixVersions []VersionField   `json:"fixVersions"`
-	Assignee    *UserField       `json:"assignee"`
-	IssueType   TypeField        `json:"issuetype"`
-	Resolution  *ResField        `json:"resolution"`
-	Updated     string           `json:"updated"`
-	DueDate     string           `json:"duedate"`
-	Components  []ComponentField `json:"components"`
+	Summary     string                     `json:"summary"`
+	Status      StatusField                `json:"status"`
+	Priority    PriorityField              `json:"priority"`
+	Labels      []string                   `json:"labels"`
+	FixVersions []VersionField             `json:"fixVersions"`
+	Assignee    *UserField                 `json:"assignee"`
+	IssueType   TypeField                  `json:"issuetype"`
+	Resolution  *ResField                  `json:"resolution"`
+	Updated     string                     `json:"updated"`
+	DueDate     string                     `json:"duedate"`
+	Components  []ComponentField           `json:"components"`
+	Raw         map[string]json.RawMessage `json:"-"`
+}
+
+// UnmarshalJSON decodes known fields and captures raw JSON for custom field extraction.
+func (f *IssueFields) UnmarshalJSON(data []byte) error {
+	type Alias IssueFields
+	a := (*Alias)(f)
+	if err := json.Unmarshal(data, a); err != nil {
+		return err
+	}
+	return json.Unmarshal(data, &f.Raw)
 }
 
 type StatusField struct {
@@ -242,6 +257,9 @@ func (c *Client) buildSearchJQL(fixVersion string) string {
 func (c *Client) SearchIssues(ctx context.Context, fixVersion string) ([]Issue, error) {
 	jql := c.buildSearchJQL(fixVersion)
 	fields := "summary,status,priority,labels,fixVersions,assignee,issuetype,resolution,updated"
+	if c.qaContactField != "" {
+		fields += "," + c.qaContactField
+	}
 
 	var allIssues []Issue
 	startAt := 0
@@ -264,6 +282,17 @@ func (c *Client) SearchIssues(ctx context.Context, fixVersion string) ([]Issue, 
 		var resp searchResponse
 		if err := json.Unmarshal(body, &resp); err != nil {
 			return nil, fmt.Errorf("decode search response: %w", err)
+		}
+
+		if c.qaContactField != "" {
+			for i := range resp.Issues {
+				if v, ok := resp.Issues[i].Fields.Raw[c.qaContactField]; ok {
+					var u *UserField
+					if json.Unmarshal(v, &u) == nil && u != nil {
+						resp.Issues[i].QAContact = u.DisplayName
+					}
+				}
+			}
 		}
 
 		allIssues = append(allIssues, resp.Issues...)
