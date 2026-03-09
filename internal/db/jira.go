@@ -21,6 +21,7 @@ func (d *DB) UpsertJiraIssue(ctx context.Context, issue *model.JiraIssueRecord) 
 		IssueType:  issue.IssueType,
 		Resolution: issue.Resolution,
 		Link:       issue.Link,
+		QaContact:  issue.QAContact,
 		UpdatedAt:  issue.UpdatedAt.UTC().Format(time.RFC3339),
 	})
 }
@@ -28,7 +29,7 @@ func (d *DB) UpsertJiraIssue(ctx context.Context, issue *model.JiraIssueRecord) 
 // ListJiraIssues returns issues for a fixVersion with optional filters.
 // Stays hand-written due to dynamic WHERE clause construction.
 func (d *DB) ListJiraIssues(ctx context.Context, fixVersion string, issueType, status, label string) ([]model.JiraIssueRecord, error) {
-	query := `SELECT id, key, summary, status, priority, labels, fix_version, assignee, issue_type, resolution, link, updated_at
+	query := `SELECT id, key, summary, status, priority, labels, fix_version, assignee, issue_type, resolution, link, qa_contact, updated_at
 		FROM jira_issues WHERE fix_version = ?`
 	args := []interface{}{fixVersion}
 
@@ -58,7 +59,7 @@ func (d *DB) ListJiraIssues(ctx context.Context, fixVersion string, issueType, s
 		var ts string
 		if err := rows.Scan(&i.ID, &i.Key, &i.Summary, &i.Status, &i.Priority,
 			&i.Labels, &i.FixVersion, &i.Assignee, &i.IssueType, &i.Resolution,
-			&i.Link, &ts); err != nil {
+			&i.Link, &i.QAContact, &ts); err != nil {
 			return nil, err
 		}
 		i.UpdatedAt = parseTime(ts)

@@ -170,6 +170,7 @@ func (s *Syncer) syncVersion(ctx context.Context, fixVersion string) {
 				IssueType:  issue.Fields.IssueType.Name,
 				Resolution: resolution,
 				Link:       jiraURL,
+				QAContact:  issue.QAContact,
 				UpdatedAt:  updatedAt,
 			}
 
