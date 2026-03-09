@@ -304,9 +304,9 @@ func (s *Server) handleDownloadSuiteArtifacts(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-artifacts.tar.gz"`, suite.Name))
 
 	gw := gzip.NewWriter(w)
-	defer gw.Close()
+	defer func() { _ = gw.Close() }()
 	tw := tar.NewWriter(gw)
-	defer tw.Close()
+	defer func() { _ = tw.Close() }()
 
 	for _, key := range keys {
 		body, size, err := s.s3.GetObjectStream(ctx, key)
@@ -319,18 +319,18 @@ func (s *Server) handleDownloadSuiteArtifacts(w http.ResponseWriter, r *http.Req
 		if err := tw.WriteHeader(&tar.Header{
 			Name: relPath,
 			Size: size,
-			Mode: 0644,
+			Mode: 0o644,
 		}); err != nil {
-			body.Close()
+			_ = body.Close()
 			s.logger.Error("write tar header", "key", key, "error", err)
 			return
 		}
 		if _, err := io.Copy(tw, body); err != nil {
-			body.Close()
+			_ = body.Close()
 			s.logger.Error("write tar body", "key", key, "error", err)
 			return
 		}
-		body.Close()
+		_ = body.Close()
 	}
 }
 

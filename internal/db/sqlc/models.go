@@ -23,6 +23,7 @@ type JiraIssue struct {
 	IssueType  string
 	Resolution string
 	Link       string
+	QaContact  string
 	UpdatedAt  string
 }
 
