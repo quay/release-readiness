@@ -17,10 +17,11 @@ type Server struct {
 	http        *http.Server
 	logger      *slog.Logger
 	jiraBaseURL string
+	jiraProject string
 }
 
-func New(database *db.DB, s3c *s3client.Client, addr, jiraBaseURL string, logger *slog.Logger) *Server {
-	s := &Server{db: database, s3: s3c, logger: logger, jiraBaseURL: jiraBaseURL}
+func New(database *db.DB, s3c *s3client.Client, addr, jiraBaseURL, jiraProject string, logger *slog.Logger) *Server {
+	s := &Server{db: database, s3: s3c, logger: logger, jiraBaseURL: jiraBaseURL, jiraProject: jiraProject}
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
 

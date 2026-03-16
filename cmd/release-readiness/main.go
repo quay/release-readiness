@@ -107,7 +107,7 @@ func main() {
 		}()
 	}
 
-	srv := server.New(database, s3c, *addr, *jiraURL, logger)
+	srv := server.New(database, s3c, *addr, *jiraURL, *jiraProject, logger)
 	if err := srv.Run(ctx); err != nil {
 		logger.Error("server", "error", err)
 		os.Exit(1)

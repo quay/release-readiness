@@ -12,6 +12,7 @@ import {
 	Label,
 	MenuToggle,
 	PageSection,
+	Popover,
 	ProgressStep,
 	ProgressStepper,
 	Select,
@@ -28,6 +29,7 @@ import {
 	CheckCircleIcon,
 	DownloadIcon,
 	ExclamationCircleIcon,
+	OutlinedQuestionCircleIcon,
 } from "@patternfly/react-icons";
 import {
 	ExpandableRowContent,
@@ -50,6 +52,7 @@ import {
 	listReleaseIssues,
 } from "../api/client";
 import type {
+	DashboardConfig,
 	IssueSummary,
 	JiraIssue,
 	ReadinessResponse,
@@ -564,7 +567,13 @@ export default function ReleaseDetail() {
 					</Card>
 				)}
 
-				{(issues ?? []).length > 0 && <IssuesCard issues={issues ?? []} />}
+				{(issues ?? []).length > 0 && (
+					<IssuesCard
+						issues={issues ?? []}
+						version={version!}
+						config={config ?? undefined}
+					/>
+				)}
 			</PageSection>
 		</>
 	);
@@ -743,7 +752,24 @@ const priorityWeight: Record<string, number> = {
 	undefined: 5,
 };
 
-function IssuesCard({ issues }: { issues: JiraIssue[] }) {
+function buildJQL(
+	config: DashboardConfig | undefined,
+	version: string,
+): string | undefined {
+	if (!config?.jira_project) return undefined;
+	const project = config.jira_project;
+	return `project=${project} AND (fixVersion="${version}" OR "Target Version"="${version}")`;
+}
+
+function IssuesCard({
+	issues,
+	version,
+	config,
+}: {
+	issues: JiraIssue[];
+	version: string;
+	config?: DashboardConfig;
+}) {
 	const [typeFilter, setTypeFilter] = useState<string>("All");
 	const [typeSelectOpen, setTypeSelectOpen] = useState(false);
 
@@ -760,6 +786,8 @@ function IssuesCard({ issues }: { issues: JiraIssue[] }) {
 		[issues, typeFilter],
 	);
 
+	const jql = buildJQL(config, version);
+
 	return (
 		<Card isCompact style={{ marginBottom: "1rem" }}>
 			<CardTitle>
@@ -767,7 +795,20 @@ function IssuesCard({ issues }: { issues: JiraIssue[] }) {
 					justifyContent={{ default: "justifyContentSpaceBetween" }}
 					alignItems={{ default: "alignItemsCenter" }}
 				>
-					<FlexItem>{`Linked Issues (${filteredIssues.length})`}</FlexItem>
+					<FlexItem>
+						{`Linked Issues (${filteredIssues.length})`}
+						{jql && (
+							<Popover headerContent="JQL Query" bodyContent={jql}>
+								<Button
+									variant="plain"
+									aria-label="Show JQL query"
+									style={{ padding: "0 0 0 0.25rem" }}
+								>
+									<OutlinedQuestionCircleIcon />
+								</Button>
+							</Popover>
+						)}
+					</FlexItem>
 					<FlexItem>
 						<Select
 							isOpen={typeSelectOpen}

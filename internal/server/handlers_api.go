@@ -18,6 +18,7 @@ import (
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"jira_base_url": s.jiraBaseURL,
+		"jira_project":  s.jiraProject,
 	})
 }
 
