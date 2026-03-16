@@ -132,4 +132,5 @@ export interface ReleaseOverview {
 
 export interface DashboardConfig {
 	jira_base_url: string;
+	jira_project: string;
 }
