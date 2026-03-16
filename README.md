@@ -69,8 +69,9 @@ cd web && npm install && npm run build
 | `-s3-access-key` | `AWS_ACCESS_KEY_ID` | — | S3 access key |
 | `-s3-secret-key` | `AWS_SECRET_ACCESS_KEY` | — | S3 secret key |
 | `-s3-poll-interval` | — | `30s` | S3 sync poll interval |
-| `-jira-url` | `JIRA_URL` | `https://issues.redhat.com` | JIRA server URL |
-| `-jira-token` | `JIRA_TOKEN` | — | JIRA personal access token (required to enable JIRA sync) |
+| `-jira-url` | `JIRA_URL` | `https://redhat.atlassian.net` | JIRA Cloud URL |
+| `-jira-email` | `JIRA_EMAIL` | — | JIRA Cloud account email for API token auth |
+| `-jira-token` | `JIRA_TOKEN` | — | JIRA Cloud API token (required to enable JIRA sync) |
 | `-jira-project` | `JIRA_PROJECT` | `PROJQUAY` | JIRA project key |
 | `-jira-target-version-field` | `JIRA_TARGET_VERSION_FIELD` | `customfield_12319940` | JIRA custom field for Target Version |
 | `-jira-poll-interval` | — | `5m` | JIRA sync poll interval |

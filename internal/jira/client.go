@@ -1,4 +1,4 @@
-// Package jira provides a client for querying JIRA Server and Cloud REST APIs.
+// Package jira provides a client for querying JIRA Cloud REST APIs.
 package jira
 
 import (
@@ -17,8 +17,9 @@ import (
 
 // Config holds JIRA connection settings.
 type Config struct {
-	BaseURL            string // e.g. https://issues.redhat.com
-	Token              string // Personal Access Token (Server) or API token (Cloud)
+	BaseURL            string // e.g. https://redhat.atlassian.net
+	Email              string // JIRA Cloud account email for Basic Auth
+	Token              string // JIRA Cloud API token
 	Project            string // e.g. PROJQUAY
 	TargetVersionField string // custom field name for Target Version (e.g. customfield_12319940)
 	QAContactField     string // custom field name for QA Contact (e.g. customfield_12315948)
@@ -27,6 +28,7 @@ type Config struct {
 // Client is a JIRA REST API client.
 type Client struct {
 	baseURL            string
+	email              string
 	token              string
 	project            string
 	targetVersionField string
@@ -39,6 +41,7 @@ type Client struct {
 func New(cfg Config) *Client {
 	return &Client{
 		baseURL:            strings.TrimRight(cfg.BaseURL, "/"),
+		email:              cfg.Email,
 		token:              cfg.Token,
 		project:            cfg.Project,
 		targetVersionField: cfg.TargetVersionField,
@@ -117,10 +120,9 @@ type ComponentField struct {
 }
 
 type searchResponse struct {
-	Total      int     `json:"total"`
-	MaxResults int     `json:"maxResults"`
-	StartAt    int     `json:"startAt"`
-	Issues     []Issue `json:"issues"`
+	NextPageToken string  `json:"nextPageToken,omitempty"`
+	MaxResults    int     `json:"maxResults"`
+	Issues        []Issue `json:"issues"`
 }
 
 // ActiveRelease represents a release discovered from JIRA via the -area/release component.
@@ -167,18 +169,19 @@ func (c *Client) DiscoverActiveReleases(ctx context.Context) ([]ActiveRelease, e
 	fields := "summary,status,fixVersions,duedate,components,assignee"
 
 	var allIssues []Issue
-	startAt := 0
-	maxResults := 100
+	nextPageToken := ""
 
 	for {
 		params := url.Values{
 			"jql":        {jql},
 			"fields":     {fields},
-			"startAt":    {fmt.Sprintf("%d", startAt)},
-			"maxResults": {fmt.Sprintf("%d", maxResults)},
+			"maxResults": {"100"},
+		}
+		if nextPageToken != "" {
+			params.Set("nextPageToken", nextPageToken)
 		}
 
-		reqURL := fmt.Sprintf("%s/rest/api/2/search?%s", c.baseURL, params.Encode())
+		reqURL := fmt.Sprintf("%s/rest/api/3/search/jql?%s", c.baseURL, params.Encode())
 		body, err := c.doGetWithRetry(ctx, reqURL)
 		if err != nil {
 			return nil, fmt.Errorf("discover releases: %w", err)
@@ -191,10 +194,10 @@ func (c *Client) DiscoverActiveReleases(ctx context.Context) ([]ActiveRelease, e
 
 		allIssues = append(allIssues, resp.Issues...)
 
-		if startAt+len(resp.Issues) >= resp.Total {
+		if resp.NextPageToken == "" {
 			break
 		}
-		startAt += len(resp.Issues)
+		nextPageToken = resp.NextPageToken
 	}
 
 	var releases []ActiveRelease
@@ -263,18 +266,19 @@ func (c *Client) SearchIssues(ctx context.Context, fixVersion string) ([]Issue, 
 	}
 
 	var allIssues []Issue
-	startAt := 0
-	maxResults := 100
+	nextPageToken := ""
 
 	for {
 		params := url.Values{
 			"jql":        {jql},
 			"fields":     {fields},
-			"startAt":    {fmt.Sprintf("%d", startAt)},
-			"maxResults": {fmt.Sprintf("%d", maxResults)},
+			"maxResults": {"100"},
+		}
+		if nextPageToken != "" {
+			params.Set("nextPageToken", nextPageToken)
 		}
 
-		reqURL := fmt.Sprintf("%s/rest/api/2/search?%s", c.baseURL, params.Encode())
+		reqURL := fmt.Sprintf("%s/rest/api/3/search/jql?%s", c.baseURL, params.Encode())
 		body, err := c.doGetWithRetry(ctx, reqURL)
 		if err != nil {
 			return nil, fmt.Errorf("search issues: %w", err)
@@ -298,10 +302,10 @@ func (c *Client) SearchIssues(ctx context.Context, fixVersion string) ([]Issue, 
 
 		allIssues = append(allIssues, resp.Issues...)
 
-		if startAt+len(resp.Issues) >= resp.Total {
+		if resp.NextPageToken == "" {
 			break
 		}
-		startAt += len(resp.Issues)
+		nextPageToken = resp.NextPageToken
 	}
 
 	return allIssues, nil
@@ -309,7 +313,7 @@ func (c *Client) SearchIssues(ctx context.Context, fixVersion string) ([]Issue, 
 
 // GetVersion fetches version metadata from JIRA for the given project and version name.
 func (c *Client) GetVersion(ctx context.Context, versionName string) (*VersionField, error) {
-	reqURL := fmt.Sprintf("%s/rest/api/2/project/%s/versions", c.baseURL, url.PathEscape(c.project))
+	reqURL := fmt.Sprintf("%s/rest/api/3/project/%s/versions", c.baseURL, url.PathEscape(c.project))
 	body, err := c.doGetWithRetry(ctx, reqURL)
 	if err != nil {
 		return nil, fmt.Errorf("get versions: %w", err)
@@ -377,7 +381,7 @@ func (c *Client) doGet(ctx context.Context, reqURL string) ([]byte, error) {
 	}
 	req.Header.Set("Accept", "application/json")
 	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
+		req.SetBasicAuth(c.email, c.token)
 	}
 
 	resp, err := c.httpClient.Do(req)

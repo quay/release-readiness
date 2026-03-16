@@ -605,7 +605,7 @@ function ReleaseSignal({
 	const ticketLink = release.release_ticket_key
 		? jiraIssueUrl(
 				release.release_ticket_key,
-				jiraBaseUrl || "https://issues.redhat.com",
+				jiraBaseUrl || "https://redhat.atlassian.net",
 			)
 		: null;
 
