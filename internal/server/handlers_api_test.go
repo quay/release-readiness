@@ -25,7 +25,7 @@ func setupTestServer(t *testing.T) *Server {
 		_ = database.Close()
 		_ = os.Remove(dbPath)
 	})
-	return New(database, nil, ":0", "https://issues.redhat.com", slog.Default())
+	return New(database, nil, ":0", "https://redhat.atlassian.net", slog.Default())
 }
 
 func TestHealthEndpoint(t *testing.T) {
@@ -134,7 +134,7 @@ func TestReleasesOverview(t *testing.T) {
 	err = srv.db.UpsertJiraIssue(ctx, &model.JiraIssueRecord{
 		Key: "PROJQUAY-1", Summary: "fix bug", Status: "Open",
 		Priority: "Major", FixVersion: "3.16.3", IssueType: "Bug",
-		Link: "https://issues.redhat.com/browse/PROJQUAY-1", UpdatedAt: time.Now(),
+		Link: "https://redhat.atlassian.net/browse/PROJQUAY-1", UpdatedAt: time.Now(),
 	})
 	if err != nil {
 		t.Fatalf("upsert issue: %v", err)

@@ -2,6 +2,7 @@ package jira
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -27,21 +28,20 @@ func TestSearchIssues(t *testing.T) {
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/rest/api/2/search" {
+		if r.URL.Path != "/rest/api/3/search/jql" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 			http.Error(w, "not found", 404)
 			return
 		}
 
-		// Check auth header
-		if r.Header.Get("Authorization") != "Bearer test-token" {
+		// Check Basic Auth header
+		wantAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte("test@example.com:test-token"))
+		if r.Header.Get("Authorization") != wantAuth {
 			t.Errorf("unexpected auth: %s", r.Header.Get("Authorization"))
 		}
 
 		resp := searchResponse{
-			Total:      1,
 			MaxResults: 100,
-			StartAt:    0,
 			Issues:     issues,
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -51,6 +51,7 @@ func TestSearchIssues(t *testing.T) {
 
 	client := New(Config{
 		BaseURL: srv.URL,
+		Email:   "test@example.com",
 		Token:   "test-token",
 		Project: "PROJQUAY",
 	})
@@ -78,6 +79,9 @@ func TestGetVersion(t *testing.T) {
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/3/project/PROJQUAY/versions" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(versions)
 	}))
@@ -85,6 +89,7 @@ func TestGetVersion(t *testing.T) {
 
 	client := New(Config{
 		BaseURL: srv.URL,
+		Email:   "test@example.com",
 		Token:   "test-token",
 		Project: "PROJQUAY",
 	})
@@ -112,14 +117,13 @@ func TestSearchIssuesPagination(t *testing.T) {
 	callCount := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
-		startAt := r.URL.Query().Get("startAt")
+		token := r.URL.Query().Get("nextPageToken")
 
 		var resp searchResponse
-		if startAt == "0" {
+		if token == "" {
 			resp = searchResponse{
-				Total:      3,
-				MaxResults: 2,
-				StartAt:    0,
+				MaxResults:    2,
+				NextPageToken: "page2",
 				Issues: []Issue{
 					{Key: "PROJ-1"},
 					{Key: "PROJ-2"},
@@ -127,9 +131,7 @@ func TestSearchIssuesPagination(t *testing.T) {
 			}
 		} else {
 			resp = searchResponse{
-				Total:      3,
 				MaxResults: 2,
-				StartAt:    2,
 				Issues: []Issue{
 					{Key: "PROJ-3"},
 				},
@@ -156,16 +158,17 @@ func TestSearchIssuesPagination(t *testing.T) {
 
 func TestDiscoverActiveReleases(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/3/search/jql" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+
 		jql := r.URL.Query().Get("jql")
 		if jql == "" {
 			t.Error("expected JQL parameter")
 		}
 
-		// Simulate real JIRA tickets: no fixVersions set, version only in summary
 		resp := searchResponse{
-			Total:      3,
 			MaxResults: 100,
-			StartAt:    0,
 			Issues: []Issue{
 				{
 					Key: "PROJQUAY-10276",
@@ -209,6 +212,7 @@ func TestDiscoverActiveReleases(t *testing.T) {
 
 	client := New(Config{
 		BaseURL: srv.URL,
+		Email:   "test@example.com",
 		Token:   "test-token",
 		Project: "PROJQUAY",
 	})
@@ -352,9 +356,7 @@ func TestSearchIssuesWithTargetVersion(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedJQL = r.URL.Query().Get("jql")
 		resp := searchResponse{
-			Total:      1,
 			MaxResults: 100,
-			StartAt:    0,
 			Issues:     []Issue{{Key: "PROJQUAY-10157"}},
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -394,9 +396,7 @@ func TestRateLimitRetry(t *testing.T) {
 			return
 		}
 		resp := searchResponse{
-			Total:      1,
 			MaxResults: 100,
-			StartAt:    0,
 			Issues:     []Issue{{Key: "PROJ-1"}},
 		}
 		w.Header().Set("Content-Type", "application/json")

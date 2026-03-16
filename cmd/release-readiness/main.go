@@ -29,8 +29,9 @@ func main() {
 	s3PollInterval := flag.Duration("s3-poll-interval", 30*time.Second, "S3 sync poll interval")
 
 	// JIRA flags
-	jiraURL := flag.String("jira-url", envOrDefault("JIRA_URL", "https://issues.redhat.com"), "JIRA server URL")
-	jiraToken := flag.String("jira-token", os.Getenv("JIRA_TOKEN"), "JIRA personal access token")
+	jiraURL := flag.String("jira-url", envOrDefault("JIRA_URL", "https://redhat.atlassian.net"), "JIRA Cloud URL")
+	jiraEmail := flag.String("jira-email", os.Getenv("JIRA_EMAIL"), "JIRA Cloud account email for API token auth")
+	jiraToken := flag.String("jira-token", os.Getenv("JIRA_TOKEN"), "JIRA Cloud API token")
 	jiraProject := flag.String("jira-project", envOrDefault("JIRA_PROJECT", "PROJQUAY"), "JIRA project key")
 	jiraTargetVersionField := flag.String("jira-target-version-field", envOrDefault("JIRA_TARGET_VERSION_FIELD", "customfield_12319940"), "JIRA custom field name for Target Version")
 	jiraQAContactField := flag.String("jira-qa-contact-field", envOrDefault("JIRA_QA_CONTACT_FIELD", "customfield_12315948"), "JIRA custom field name for QA Contact")
@@ -85,6 +86,7 @@ func main() {
 	if *jiraToken != "" {
 		jiraClient := jira.New(jira.Config{
 			BaseURL:            *jiraURL,
+			Email:              *jiraEmail,
 			Token:              *jiraToken,
 			Project:            *jiraProject,
 			TargetVersionField: *jiraTargetVersionField,
