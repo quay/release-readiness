@@ -1,3 +1,4 @@
+import { ColumnManagementModal } from "@patternfly/react-component-groups";
 import {
 	Breadcrumb,
 	BreadcrumbItem,
@@ -26,6 +27,7 @@ import {
 } from "@patternfly/react-core";
 import {
 	CheckCircleIcon,
+	ColumnsIcon,
 	DownloadIcon,
 	ExclamationCircleIcon,
 } from "@patternfly/react-icons";
@@ -63,6 +65,10 @@ import StatusLabel from "../components/StatusLabel";
 import TestCasesTable from "../components/TestCasesTable";
 import VulnerabilitiesTable from "../components/VulnerabilitiesTable";
 import { useCachedFetch } from "../hooks/useCachedFetch";
+import {
+	type ColumnDef,
+	useColumnManagement,
+} from "../hooks/useColumnManagement";
 import { useConfig } from "../hooks/useConfig";
 import { formatReleaseName, jiraIssueUrl, quayImageUrl } from "../utils/links";
 
@@ -734,6 +740,16 @@ function SeverityCount({
 	);
 }
 
+const ISSUES_COLUMNS: ColumnDef[] = [
+	{ key: "key", label: "Key" },
+	{ key: "type", label: "Type" },
+	{ key: "summary", label: "Summary" },
+	{ key: "priority", label: "Priority" },
+	{ key: "status", label: "Status" },
+	{ key: "assignee", label: "Assignee" },
+	{ key: "qaContact", label: "QA Contact" },
+];
+
 const priorityWeight: Record<string, number> = {
 	blocker: 0,
 	critical: 1,
@@ -746,6 +762,7 @@ const priorityWeight: Record<string, number> = {
 function IssuesCard({ issues }: { issues: JiraIssue[] }) {
 	const [typeFilter, setTypeFilter] = useState<string>("All");
 	const [typeSelectOpen, setTypeSelectOpen] = useState(false);
+	const columnMgmt = useColumnManagement("rr-columns-issues", ISSUES_COLUMNS);
 
 	const issueTypes = useMemo(() => {
 		const types = new Set(issues.map((i) => i.issue_type));
@@ -769,44 +786,68 @@ function IssuesCard({ issues }: { issues: JiraIssue[] }) {
 				>
 					<FlexItem>{`Linked Issues (${filteredIssues.length})`}</FlexItem>
 					<FlexItem>
-						<Select
-							isOpen={typeSelectOpen}
-							selected={typeFilter}
-							onSelect={(_e, value) => {
-								setTypeFilter(value as string);
-								setTypeSelectOpen(false);
-							}}
-							onOpenChange={setTypeSelectOpen}
-							toggle={(toggleRef) => (
-								<MenuToggle
-									ref={toggleRef}
-									onClick={() => setTypeSelectOpen((prev) => !prev)}
-									isExpanded={typeSelectOpen}
-								>
-									Type: {typeFilter}
-								</MenuToggle>
-							)}
+						<Flex
+							alignItems={{ default: "alignItemsCenter" }}
+							spaceItems={{ default: "spaceItemsMd" }}
 						>
-							<SelectList>
-								{issueTypes.map((t) => (
-									<SelectOption key={t} value={t}>
-										{t}
-									</SelectOption>
-								))}
-							</SelectList>
-						</Select>
+							<FlexItem>
+								<Button
+									variant="plain"
+									aria-label="Manage columns"
+									onClick={columnMgmt.openModal}
+								>
+									<ColumnsIcon />
+								</Button>
+							</FlexItem>
+							<FlexItem>
+								<Select
+									isOpen={typeSelectOpen}
+									selected={typeFilter}
+									onSelect={(_e, value) => {
+										setTypeFilter(value as string);
+										setTypeSelectOpen(false);
+									}}
+									onOpenChange={setTypeSelectOpen}
+									toggle={(toggleRef) => (
+										<MenuToggle
+											ref={toggleRef}
+											onClick={() => setTypeSelectOpen((prev) => !prev)}
+											isExpanded={typeSelectOpen}
+										>
+											Type: {typeFilter}
+										</MenuToggle>
+									)}
+								>
+									<SelectList>
+										{issueTypes.map((t) => (
+											<SelectOption key={t} value={t}>
+												{t}
+											</SelectOption>
+										))}
+									</SelectList>
+								</Select>
+							</FlexItem>
+						</Flex>
 					</FlexItem>
 				</Flex>
 			</CardTitle>
 			<CardBody>
-				<IssuesTable issues={filteredIssues} />
+				<IssuesTable issues={filteredIssues} columnMgmt={columnMgmt} />
 			</CardBody>
 		</Card>
 	);
 }
 
-function IssuesTable({ issues }: { issues: JiraIssue[] }) {
-	const [activeSortIndex, setActiveSortIndex] = useState<number | undefined>(
+function IssuesTable({
+	issues,
+	columnMgmt,
+}: {
+	issues: JiraIssue[];
+	columnMgmt: ReturnType<typeof useColumnManagement>;
+}) {
+	const { isColumnVisible, visibleColumns } = columnMgmt;
+
+	const [activeSortKey, setActiveSortKey] = useState<string | undefined>(
 		undefined,
 	);
 	const [activeSortDirection, setActiveSortDirection] = useState<
@@ -814,98 +855,140 @@ function IssuesTable({ issues }: { issues: JiraIssue[] }) {
 	>(undefined);
 
 	const sortedIssues = useMemo(() => {
-		if (activeSortIndex === undefined || activeSortDirection === undefined) {
+		if (activeSortKey === undefined || activeSortDirection === undefined) {
 			return issues;
 		}
 		return [...issues].sort((a, b) => {
 			let cmp = 0;
-			switch (activeSortIndex) {
-				case 1: // Type
+			switch (activeSortKey) {
+				case "type":
 					cmp = a.issue_type.localeCompare(b.issue_type);
 					break;
-				case 3: // Priority
+				case "priority":
 					cmp =
 						(priorityWeight[a.priority.toLowerCase()] ?? 5) -
 						(priorityWeight[b.priority.toLowerCase()] ?? 5);
 					break;
-				case 4: // Status
+				case "status":
 					cmp = a.status.localeCompare(b.status);
 					break;
-				case 5: // Assignee
+				case "assignee":
 					cmp = a.assignee.localeCompare(b.assignee);
 					break;
-				case 6: // QA Contact
+				case "qaContact":
 					cmp = a.qa_contact.localeCompare(b.qa_contact);
 					break;
 			}
 			return activeSortDirection === "asc" ? cmp : -cmp;
 		});
-	}, [issues, activeSortIndex, activeSortDirection]);
+	}, [issues, activeSortKey, activeSortDirection]);
 
-	const getSortParams = (columnIndex: number): ThProps["sort"] => ({
+	const visibleColumnKeys = visibleColumns.map((c) => c.key);
+
+	const getSortParams = (columnKey: string): ThProps["sort"] => ({
 		sortBy: {
-			index: activeSortIndex,
+			index: activeSortKey
+				? visibleColumnKeys.indexOf(activeSortKey)
+				: undefined,
 			direction: activeSortDirection,
 		},
-		onSort: (_event, index, direction) => {
-			setActiveSortIndex(index);
+		onSort: (_event, _index, direction) => {
+			setActiveSortKey(columnKey);
 			setActiveSortDirection(direction);
 		},
-		columnIndex,
+		columnIndex: visibleColumnKeys.indexOf(columnKey),
 	});
 
 	return (
-		<Table variant="compact" style={{ tableLayout: "auto" }}>
-			<Thead>
-				<Tr>
-					<Th style={{ whiteSpace: "nowrap" }}>Key</Th>
-					<Th sort={getSortParams(1)} style={{ whiteSpace: "nowrap" }}>
-						Type
-					</Th>
-					<Th>Summary</Th>
-					<Th
-						sort={getSortParams(3)}
-						style={{ whiteSpace: "nowrap", minWidth: "120px" }}
-					>
-						Priority
-					</Th>
-					<Th
-						sort={getSortParams(4)}
-						style={{ whiteSpace: "nowrap", minWidth: "110px" }}
-					>
-						Status
-					</Th>
-					<Th sort={getSortParams(5)} style={{ whiteSpace: "nowrap" }}>
-						Assignee
-					</Th>
-					<Th sort={getSortParams(6)} style={{ whiteSpace: "nowrap" }}>
-						QA Contact
-					</Th>
-				</Tr>
-			</Thead>
-			<Tbody>
-				{sortedIssues.map((issue) => (
-					<Tr key={issue.key}>
-						<Td>
-							<a href={issue.link} target="_blank" rel="noopener noreferrer">
-								{issue.key}
-							</a>
-						</Td>
-						<Td>{issue.issue_type}</Td>
-						<Td style={{ whiteSpace: "normal", wordBreak: "break-word" }}>
-							{issue.summary}
-						</Td>
-						<Td>
-							<PriorityLabel priority={issue.priority} />
-						</Td>
-						<Td>
-							<StatusLabel status={issue.status} />
-						</Td>
-						<Td>{issue.assignee}</Td>
-						<Td>{issue.qa_contact}</Td>
+		<>
+			<Table variant="compact" style={{ tableLayout: "auto" }}>
+				<Thead>
+					<Tr>
+						{isColumnVisible("key") && (
+							<Th style={{ whiteSpace: "nowrap" }}>Key</Th>
+						)}
+						{isColumnVisible("type") && (
+							<Th sort={getSortParams("type")} style={{ whiteSpace: "nowrap" }}>
+								Type
+							</Th>
+						)}
+						{isColumnVisible("summary") && <Th>Summary</Th>}
+						{isColumnVisible("priority") && (
+							<Th
+								sort={getSortParams("priority")}
+								style={{ whiteSpace: "nowrap", minWidth: "120px" }}
+							>
+								Priority
+							</Th>
+						)}
+						{isColumnVisible("status") && (
+							<Th
+								sort={getSortParams("status")}
+								style={{ whiteSpace: "nowrap", minWidth: "110px" }}
+							>
+								Status
+							</Th>
+						)}
+						{isColumnVisible("assignee") && (
+							<Th
+								sort={getSortParams("assignee")}
+								style={{ whiteSpace: "nowrap" }}
+							>
+								Assignee
+							</Th>
+						)}
+						{isColumnVisible("qaContact") && (
+							<Th
+								sort={getSortParams("qaContact")}
+								style={{ whiteSpace: "nowrap" }}
+							>
+								QA Contact
+							</Th>
+						)}
 					</Tr>
-				))}
-			</Tbody>
-		</Table>
+				</Thead>
+				<Tbody>
+					{sortedIssues.map((issue) => (
+						<Tr key={issue.key}>
+							{isColumnVisible("key") && (
+								<Td>
+									<a
+										href={issue.link}
+										target="_blank"
+										rel="noopener noreferrer"
+									>
+										{issue.key}
+									</a>
+								</Td>
+							)}
+							{isColumnVisible("type") && <Td>{issue.issue_type}</Td>}
+							{isColumnVisible("summary") && (
+								<Td style={{ whiteSpace: "normal", wordBreak: "break-word" }}>
+									{issue.summary}
+								</Td>
+							)}
+							{isColumnVisible("priority") && (
+								<Td>
+									<PriorityLabel priority={issue.priority} />
+								</Td>
+							)}
+							{isColumnVisible("status") && (
+								<Td>
+									<StatusLabel status={issue.status} />
+								</Td>
+							)}
+							{isColumnVisible("assignee") && <Td>{issue.assignee}</Td>}
+							{isColumnVisible("qaContact") && <Td>{issue.qa_contact}</Td>}
+						</Tr>
+					))}
+				</Tbody>
+			</Table>
+			<ColumnManagementModal
+				appliedColumns={columnMgmt.appliedColumns}
+				applyColumns={columnMgmt.applyColumns}
+				isOpen={columnMgmt.isModalOpen}
+				onClose={columnMgmt.closeModal}
+			/>
+		</>
 	);
 }
