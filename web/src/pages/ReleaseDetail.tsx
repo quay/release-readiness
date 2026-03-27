@@ -774,7 +774,7 @@ function buildJQL(
 ): string | undefined {
 	if (!config?.jira_project) return undefined;
 	const project = config.jira_project;
-	return `project=${project} AND (fixVersion="${version}" OR "Target Version"="${version}")`;
+	return `project=${project} AND "Target Version"="${version}"`;
 }
 
 function IssuesCard({

@@ -86,9 +86,9 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 										</Content>
 										<Content component="ul">
 											<Content component="li">
-												<strong>JIRA</strong> — syncs active releases by
-												fixVersion and their issues. Tracks status, priority,
-												type, and assignee to compute a readiness signal.
+												<strong>JIRA</strong> — syncs active releases by Target
+												Version and their issues. Tracks status, priority, type,
+												and assignee to compute a readiness signal.
 											</Content>
 											<Content component="li">
 												<strong>Build Snapshots</strong> — polls S3 for Konflux

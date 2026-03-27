@@ -23,7 +23,7 @@ SELECT
     CAST(COUNT(*) AS INTEGER) AS total,
     CAST(COALESCE(SUM(CASE WHEN LOWER(status) IN ('closed', 'verified', 'done') THEN 1 ELSE 0 END), 0) AS INTEGER) AS verified,
     CAST(COALESCE(SUM(CASE WHEN LOWER(status) NOT IN ('closed', 'verified', 'done') THEN 1 ELSE 0 END), 0) AS INTEGER) AS open,
-    CAST(COALESCE(SUM(CASE WHEN LOWER(issue_type) = 'cve' OR LOWER(labels) LIKE '%cve%' THEN 1 ELSE 0 END), 0) AS INTEGER) AS cves,
+    CAST(COALESCE(SUM(CASE WHEN LOWER(issue_type) = 'vulnerability' OR LOWER(labels) LIKE '%cve%' THEN 1 ELSE 0 END), 0) AS INTEGER) AS cves,
     CAST(COALESCE(SUM(CASE WHEN LOWER(issue_type) = 'bug' THEN 1 ELSE 0 END), 0) AS INTEGER) AS bugs
 FROM jira_issues
 WHERE fix_version = ?

@@ -101,7 +101,7 @@ func (d *DB) GetIssueSummariesBatch(ctx context.Context, fixVersions []string) (
 			COUNT(*) AS total,
 			SUM(CASE WHEN LOWER(status) IN ('closed', 'verified', 'done') THEN 1 ELSE 0 END) AS verified,
 			SUM(CASE WHEN LOWER(status) NOT IN ('closed', 'verified', 'done') THEN 1 ELSE 0 END) AS open,
-			SUM(CASE WHEN LOWER(issue_type) = 'cve' OR LOWER(labels) LIKE '%cve%' THEN 1 ELSE 0 END) AS cves,
+			SUM(CASE WHEN LOWER(issue_type) = 'vulnerability' OR LOWER(labels) LIKE '%cve%' THEN 1 ELSE 0 END) AS cves,
 			SUM(CASE WHEN LOWER(issue_type) = 'bug' THEN 1 ELSE 0 END) AS bugs
 		FROM jira_issues
 		WHERE fix_version IN (` + strings.Join(placeholders, ",") + `)
