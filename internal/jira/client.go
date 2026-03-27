@@ -17,35 +17,32 @@ import (
 
 // Config holds JIRA connection settings.
 type Config struct {
-	BaseURL            string // e.g. https://redhat.atlassian.net
-	Email              string // JIRA Cloud account email for Basic Auth
-	Token              string // JIRA Cloud API token
-	Project            string // e.g. PROJQUAY
-	TargetVersionField string // custom field name for Target Version (e.g. customfield_12319940)
-	QAContactField     string // custom field name for QA Contact (e.g. customfield_12315948)
+	BaseURL        string // e.g. https://redhat.atlassian.net
+	Email          string // JIRA Cloud account email for Basic Auth
+	Token          string // JIRA Cloud API token
+	Project        string // e.g. PROJQUAY
+	QAContactField string // custom field name for QA Contact (e.g. customfield_12315948)
 }
 
 // Client is a JIRA REST API client.
 type Client struct {
-	baseURL            string
-	email              string
-	token              string
-	project            string
-	targetVersionField string
-	qaContactField     string
-	httpClient         *http.Client
-	minDelay           time.Duration // minimum delay between requests
+	baseURL        string
+	email          string
+	token          string
+	project        string
+	qaContactField string
+	httpClient     *http.Client
+	minDelay       time.Duration // minimum delay between requests
 }
 
 // New creates a new JIRA client.
 func New(cfg Config) *Client {
 	return &Client{
-		baseURL:            strings.TrimRight(cfg.BaseURL, "/"),
-		email:              cfg.Email,
-		token:              cfg.Token,
-		project:            cfg.Project,
-		targetVersionField: cfg.TargetVersionField,
-		qaContactField:     cfg.QAContactField,
+		baseURL:        strings.TrimRight(cfg.BaseURL, "/"),
+		email:          cfg.Email,
+		token:          cfg.Token,
+		project:        cfg.Project,
+		qaContactField: cfg.QAContactField,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -243,24 +240,17 @@ func (c *Client) DiscoverActiveReleases(ctx context.Context) ([]ActiveRelease, e
 	return releases, nil
 }
 
-// buildSearchJQL constructs the JQL for searching issues by version.
-// When a target version custom field is configured, the JQL uses an OR clause
-// to match issues by either fixVersion or the custom field.
-func (c *Client) buildSearchJQL(fixVersion string) string {
-	if c.targetVersionField == "" {
-		return fmt.Sprintf(`project=%s AND fixVersion="%s"`, c.project, fixVersion)
-	}
-	cfID := strings.TrimPrefix(c.targetVersionField, "customfield_")
-	return fmt.Sprintf(`project=%s AND (fixVersion="%s" OR cf[%s]="%s")`,
-		c.project, fixVersion, cfID, fixVersion)
+// buildSearchJQL constructs the JQL for searching issues by Target Version.
+func (c *Client) buildSearchJQL(version string) string {
+	return fmt.Sprintf(`project=%s AND "Target Version"="%s"`,
+		c.project, version)
 }
 
-// SearchIssues queries JIRA for issues matching a fixVersion or Target Version.
-// When a target version custom field is configured, issues matching either field
-// are returned. It handles pagination automatically and respects rate limits.
+// SearchIssues queries JIRA for issues matching a Target Version.
+// It handles pagination automatically and respects rate limits.
 func (c *Client) SearchIssues(ctx context.Context, fixVersion string) ([]Issue, error) {
 	jql := c.buildSearchJQL(fixVersion)
-	fields := "summary,status,priority,labels,fixVersions,assignee,issuetype,resolution,updated"
+	fields := "summary,status,priority,labels,assignee,issuetype,resolution,updated"
 	if c.qaContactField != "" {
 		fields += "," + c.qaContactField
 	}

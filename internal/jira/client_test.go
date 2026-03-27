@@ -318,40 +318,15 @@ func TestFixVersionToS3App(t *testing.T) {
 }
 
 func TestBuildSearchJQL(t *testing.T) {
-	tests := []struct {
-		name               string
-		targetVersionField string
-		fixVersion         string
-		wantJQL            string
-	}{
-		{
-			name:       "no target version field",
-			fixVersion: "quay-v3.16.2",
-			wantJQL:    `project=PROJQUAY AND fixVersion="quay-v3.16.2"`,
-		},
-		{
-			name:               "with target version field",
-			targetVersionField: "customfield_10855",
-			fixVersion:         "quay-v3.17.0",
-			wantJQL:            `project=PROJQUAY AND (fixVersion="quay-v3.17.0" OR cf[10855]="quay-v3.17.0")`,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			client := New(Config{
-				Project:            "PROJQUAY",
-				TargetVersionField: tc.targetVersionField,
-			})
-			got := client.buildSearchJQL(tc.fixVersion)
-			if got != tc.wantJQL {
-				t.Errorf("buildSearchJQL(%q):\n got %q\nwant %q", tc.fixVersion, got, tc.wantJQL)
-			}
-		})
+	client := New(Config{Project: "PROJQUAY"})
+	got := client.buildSearchJQL("quay-v3.16.2")
+	want := `project=PROJQUAY AND "Target Version"="quay-v3.16.2"`
+	if got != want {
+		t.Errorf("buildSearchJQL:\n got %q\nwant %q", got, want)
 	}
 }
 
-func TestSearchIssuesWithTargetVersion(t *testing.T) {
+func TestSearchIssuesTargetVersion(t *testing.T) {
 	var capturedJQL string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedJQL = r.URL.Query().Get("jql")
@@ -365,9 +340,8 @@ func TestSearchIssuesWithTargetVersion(t *testing.T) {
 	defer srv.Close()
 
 	client := New(Config{
-		BaseURL:            srv.URL,
-		Project:            "PROJQUAY",
-		TargetVersionField: "customfield_10855",
+		BaseURL: srv.URL,
+		Project: "PROJQUAY",
 	})
 	client.minDelay = 0
 
@@ -379,7 +353,7 @@ func TestSearchIssuesWithTargetVersion(t *testing.T) {
 		t.Fatalf("got %d issues, want 1", len(result))
 	}
 
-	wantJQL := `project=PROJQUAY AND (fixVersion="quay-v3.17.0" OR cf[10855]="quay-v3.17.0")`
+	wantJQL := `project=PROJQUAY AND "Target Version"="quay-v3.17.0"`
 	if capturedJQL != wantJQL {
 		t.Errorf("JQL:\n got %q\nwant %q", capturedJQL, wantJQL)
 	}

@@ -33,7 +33,6 @@ func main() {
 	jiraEmail := flag.String("jira-email", os.Getenv("JIRA_EMAIL"), "JIRA Cloud account email for API token auth")
 	jiraToken := flag.String("jira-token", os.Getenv("JIRA_TOKEN"), "JIRA Cloud API token")
 	jiraProject := flag.String("jira-project", envOrDefault("JIRA_PROJECT", "PROJQUAY"), "JIRA project key")
-	jiraTargetVersionField := flag.String("jira-target-version-field", envOrDefault("JIRA_TARGET_VERSION_FIELD", "customfield_10855"), "JIRA custom field name for Target Version")
 	jiraQAContactField := flag.String("jira-qa-contact-field", envOrDefault("JIRA_QA_CONTACT_FIELD", "customfield_12315948"), "JIRA custom field name for QA Contact")
 	jiraPollInterval := flag.Duration("jira-poll-interval", 5*time.Minute, "JIRA sync poll interval")
 
@@ -85,12 +84,11 @@ func main() {
 	// Start JIRA sync if token is configured
 	if *jiraToken != "" {
 		jiraClient := jira.New(jira.Config{
-			BaseURL:            *jiraURL,
-			Email:              *jiraEmail,
-			Token:              *jiraToken,
-			Project:            *jiraProject,
-			TargetVersionField: *jiraTargetVersionField,
-			QAContactField:     *jiraQAContactField,
+			BaseURL:        *jiraURL,
+			Email:          *jiraEmail,
+			Token:          *jiraToken,
+			Project:        *jiraProject,
+			QAContactField: *jiraQAContactField,
 		})
 		jiraLog := logger.With("component", "jira-sync")
 		logger.Info("jira sync enabled", "url", *jiraURL, "project", *jiraProject, "interval", *jiraPollInterval)
