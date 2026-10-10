@@ -19,35 +19,17 @@ func (d *DB) UpsertJiraIssue(ctx context.Context, issue *model.JiraIssueRecord) 
 		FixVersion: issue.FixVersion,
 		Assignee:   issue.Assignee,
 		IssueType:  issue.IssueType,
-		Resolution: issue.Resolution,
 		Link:       issue.Link,
 		QaContact:  issue.QAContact,
-		UpdatedAt:  issue.UpdatedAt.UTC().Format(time.RFC3339),
 	})
 }
 
-// ListJiraIssues returns issues for a fixVersion with optional filters.
-// Stays hand-written due to dynamic WHERE clause construction.
-func (d *DB) ListJiraIssues(ctx context.Context, fixVersion string, issueType, status, label string) ([]model.JiraIssueRecord, error) {
-	query := `SELECT id, key, summary, status, priority, labels, fix_version, assignee, issue_type, resolution, link, qa_contact, updated_at
-		FROM jira_issues WHERE fix_version = ?`
-	args := []interface{}{fixVersion}
+// ListJiraIssues returns issues for a fixVersion.
+func (d *DB) ListJiraIssues(ctx context.Context, fixVersion string) ([]model.JiraIssueRecord, error) {
+	query := `SELECT key, summary, status, priority, fix_version, assignee, issue_type, link, qa_contact
+		FROM jira_issues WHERE fix_version = ? ORDER BY key`
 
-	if issueType != "" {
-		query += ` AND issue_type = ?`
-		args = append(args, issueType)
-	}
-	if status != "" {
-		query += ` AND status = ?`
-		args = append(args, status)
-	}
-	if label != "" {
-		query += ` AND labels LIKE ?`
-		args = append(args, "%"+label+"%")
-	}
-	query += ` ORDER BY key`
-
-	rows, err := d.dbtx.QueryContext(ctx, query, args...)
+	rows, err := d.dbtx.QueryContext(ctx, query, fixVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -56,13 +38,10 @@ func (d *DB) ListJiraIssues(ctx context.Context, fixVersion string, issueType, s
 	var issues []model.JiraIssueRecord
 	for rows.Next() {
 		var i model.JiraIssueRecord
-		var ts string
-		if err := rows.Scan(&i.ID, &i.Key, &i.Summary, &i.Status, &i.Priority,
-			&i.Labels, &i.FixVersion, &i.Assignee, &i.IssueType, &i.Resolution,
-			&i.Link, &i.QAContact, &ts); err != nil {
+		if err := rows.Scan(&i.Key, &i.Summary, &i.Status, &i.Priority,
+			&i.FixVersion, &i.Assignee, &i.IssueType, &i.Link, &i.QAContact); err != nil {
 			return nil, err
 		}
-		i.UpdatedAt = parseTime(ts)
 		issues = append(issues, i)
 	}
 	return issues, rows.Err()
@@ -78,7 +57,6 @@ func (d *DB) GetIssueSummary(ctx context.Context, fixVersion string) (*model.Iss
 		Verified: int(row.Verified),
 		Open:     int(row.Open),
 		CVEs:     int(row.Cves),
-		Bugs:     int(row.Bugs),
 	}, nil
 }
 
@@ -99,10 +77,9 @@ func (d *DB) GetIssueSummariesBatch(ctx context.Context, fixVersions []string) (
 	query := `
 		SELECT fix_version,
 			COUNT(*) AS total,
-			SUM(CASE WHEN LOWER(status) IN ('closed', 'verified', 'done') THEN 1 ELSE 0 END) AS verified,
-			SUM(CASE WHEN LOWER(status) NOT IN ('closed', 'verified', 'done') THEN 1 ELSE 0 END) AS open,
-			SUM(CASE WHEN LOWER(issue_type) = 'vulnerability' OR LOWER(labels) LIKE '%cve%' THEN 1 ELSE 0 END) AS cves,
-			SUM(CASE WHEN LOWER(issue_type) = 'bug' THEN 1 ELSE 0 END) AS bugs
+			SUM(CASE WHEN LOWER(status) IN ('closed', 'verified', 'done', 'release pending') THEN 1 ELSE 0 END) AS verified,
+			SUM(CASE WHEN LOWER(status) NOT IN ('closed', 'verified', 'done', 'release pending') THEN 1 ELSE 0 END) AS open,
+			SUM(CASE WHEN LOWER(issue_type) = 'vulnerability' OR LOWER(labels) LIKE '%cve%' THEN 1 ELSE 0 END) AS cves
 		FROM jira_issues
 		WHERE fix_version IN (` + strings.Join(placeholders, ",") + `)
 		GROUP BY fix_version`
@@ -117,7 +94,7 @@ func (d *DB) GetIssueSummariesBatch(ctx context.Context, fixVersions []string) (
 	for rows.Next() {
 		var fixVersion string
 		var s model.IssueSummary
-		if err := rows.Scan(&fixVersion, &s.Total, &s.Verified, &s.Open, &s.CVEs, &s.Bugs); err != nil {
+		if err := rows.Scan(&fixVersion, &s.Total, &s.Verified, &s.Open, &s.CVEs); err != nil {
 			return nil, err
 		}
 		result[fixVersion] = &s
@@ -136,13 +113,12 @@ func (d *DB) UpsertReleaseVersion(ctx context.Context, v *model.ReleaseVersion) 
 	}
 	return d.queries().UpsertReleaseVersion(ctx, dbsqlc.UpsertReleaseVersionParams{
 		Name:                  v.Name,
-		Description:           v.Description,
 		ReleaseDate:           relDate,
 		Released:              boolToInt64(v.Released),
 		Archived:              boolToInt64(v.Archived),
 		ReleaseTicketKey:      v.ReleaseTicketKey,
 		ReleaseTicketAssignee: v.ReleaseTicketAssignee,
-		S3Application:         v.S3Application,
+		KonfluxApplication:    v.KonfluxApplication,
 		DueDate:               dueDate,
 	})
 }
@@ -152,21 +128,8 @@ func (d *DB) GetReleaseVersion(ctx context.Context, name string) (*model.Release
 	if err != nil {
 		return nil, err
 	}
-	return toReleaseVersion(row.Name, row.Description, row.ReleaseDate, row.Released, row.Archived,
-		row.ReleaseTicketKey, row.ReleaseTicketAssignee, row.S3Application, row.DueDate), nil
-}
-
-func (d *DB) ListActiveReleaseVersions(ctx context.Context) ([]model.ReleaseVersion, error) {
-	rows, err := d.queries().ListActiveReleaseVersions(ctx)
-	if err != nil {
-		return nil, err
-	}
-	versions := make([]model.ReleaseVersion, len(rows))
-	for i, r := range rows {
-		versions[i] = *toReleaseVersion(r.Name, r.Description, r.ReleaseDate, r.Released, r.Archived,
-			r.ReleaseTicketKey, r.ReleaseTicketAssignee, r.S3Application, r.DueDate)
-	}
-	return versions, nil
+	return toReleaseVersion(row.Name, row.ReleaseDate, row.Released, row.Archived,
+		row.ReleaseTicketKey, row.ReleaseTicketAssignee, row.KonfluxApplication, row.DueDate), nil
 }
 
 func (d *DB) ListAllReleaseVersions(ctx context.Context) ([]model.ReleaseVersion, error) {
@@ -176,8 +139,8 @@ func (d *DB) ListAllReleaseVersions(ctx context.Context) ([]model.ReleaseVersion
 	}
 	versions := make([]model.ReleaseVersion, len(rows))
 	for i, r := range rows {
-		versions[i] = *toReleaseVersion(r.Name, r.Description, r.ReleaseDate, r.Released, r.Archived,
-			r.ReleaseTicketKey, r.ReleaseTicketAssignee, r.S3Application, r.DueDate)
+		versions[i] = *toReleaseVersion(r.Name, r.ReleaseDate, r.Released, r.Archived,
+			r.ReleaseTicketKey, r.ReleaseTicketAssignee, r.KonfluxApplication, r.DueDate)
 	}
 	return versions, nil
 }
@@ -200,16 +163,15 @@ func (d *DB) DeleteJiraIssuesNotIn(ctx context.Context, fixVersion string, keys 
 	return err
 }
 
-func toReleaseVersion(name, description, relDate string, released, archived int64, ticketKey, ticketAssignee, s3App, dueDate string) *model.ReleaseVersion {
+func toReleaseVersion(name, relDate string, released, archived int64, ticketKey, ticketAssignee, konfluxApp, dueDate string) *model.ReleaseVersion {
 	return &model.ReleaseVersion{
 		Name:                  name,
-		Description:           description,
 		ReleaseDate:           parseOptionalTime(relDate),
 		Released:              released == 1,
 		Archived:              archived == 1,
 		ReleaseTicketKey:      ticketKey,
 		ReleaseTicketAssignee: ticketAssignee,
-		S3Application:         s3App,
+		KonfluxApplication:    konfluxApp,
 		DueDate:               parseOptionalTime(dueDate),
 	}
 }

@@ -2,125 +2,22 @@ package model
 
 import "time"
 
-type Component struct {
-	ID          int64     `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
-}
-
 type ComponentRecord struct {
-	ID         int64  `json:"id"`
-	SnapshotID int64  `json:"snapshot_id"`
-	Component  string `json:"component"`
-	GitSHA     string `json:"git_sha"`
-	ImageURL   string `json:"image_url"`
-	GitURL     string `json:"git_url"`
-}
-
-type SnapshotRecord struct {
-	ID                   int64                 `json:"id"`
-	Application          string                `json:"application"`
-	Name                 string                `json:"name"`
-	TestsPassed          bool                  `json:"tests_passed"`
-	HasTests             bool                  `json:"has_tests"`
-	CreatedAt            time.Time             `json:"created_at"`
-	Components           []ComponentRecord     `json:"components,omitempty"`
-	TestSuites           []TestSuite           `json:"test_suites,omitempty"`
-	VulnerabilityReports []VulnerabilityReport `json:"vulnerability_reports,omitempty"`
-}
-
-type TestSuite struct {
-	ID          int64      `json:"id"`
-	SnapshotID  int64      `json:"snapshot_id"`
-	Name        string     `json:"name"`
-	Status      string     `json:"status"`
-	PipelineRun string     `json:"pipeline_run"`
-	ToolName    string     `json:"tool_name"`
-	ToolVersion string     `json:"tool_version"`
-	Tests       int        `json:"tests"`
-	Passed      int        `json:"passed"`
-	Failed      int        `json:"failed"`
-	Skipped     int        `json:"skipped"`
-	Pending     int        `json:"pending"`
-	Other       int        `json:"other"`
-	Flaky       int        `json:"flaky"`
-	StartTime   int64      `json:"start_time"`
-	StopTime    int64      `json:"stop_time"`
-	DurationMs  int64      `json:"duration_ms"`
-	CreatedAt   time.Time  `json:"created_at"`
-	TestCases   []TestCase `json:"test_cases,omitempty"`
-}
-
-type TestSuiteMeta struct {
-	ID         int64  `json:"id"`
-	SnapshotID int64  `json:"snapshot_id"`
-	Name       string `json:"name"`
-}
-
-type TestCase struct {
-	ID          int64   `json:"id"`
-	TestSuiteID int64   `json:"test_suite_id"`
-	Name        string  `json:"name"`
-	Status      string  `json:"status"`
-	DurationMs  float64 `json:"duration_ms"`
-	Message     string  `json:"message,omitempty"`
-	Trace       string  `json:"trace,omitempty"`
-	FilePath    string  `json:"file_path,omitempty"`
-	Suite       string  `json:"suite,omitempty"`
-	Retries     int     `json:"retries"`
-	Flaky       bool    `json:"flaky"`
-}
-
-type VulnerabilityReport struct {
-	ID              int64           `json:"id"`
-	SnapshotID      int64           `json:"snapshot_id"`
-	Component       string          `json:"component"`
-	Arch            string          `json:"arch"`
-	Total           int             `json:"total"`
-	Critical        int             `json:"critical"`
-	High            int             `json:"high"`
-	Medium          int             `json:"medium"`
-	Low             int             `json:"low"`
-	Unknown         int             `json:"unknown"`
-	Fixable         int             `json:"fixable"`
-	CreatedAt       time.Time       `json:"created_at"`
-	Vulnerabilities []Vulnerability `json:"vulnerabilities,omitempty"`
-}
-
-type Vulnerability struct {
-	ID             int64  `json:"id"`
-	ReportID       int64  `json:"report_id"`
-	Name           string `json:"name"`
-	Severity       string `json:"severity"`
-	PackageName    string `json:"package_name"`
-	PackageVersion string `json:"package_version"`
-	FixedInVersion string `json:"fixed_in_version"`
-	Description    string `json:"description"`
-	Link           string `json:"link"`
-}
-
-type ApplicationSummary struct {
-	Application    string          `json:"application"`
-	LatestSnapshot *SnapshotRecord `json:"latest_snapshot,omitempty"`
-	SnapshotCount  int             `json:"snapshot_count"`
+	Component, ImageURL string
 }
 
 // JiraIssueRecord represents a JIRA issue cached in the database.
 type JiraIssueRecord struct {
-	ID         int64     `json:"id"`
-	Key        string    `json:"key"`
-	Summary    string    `json:"summary"`
-	Status     string    `json:"status"`
-	Priority   string    `json:"priority"`
-	Labels     string    `json:"labels"` // comma-separated
-	FixVersion string    `json:"fix_version"`
-	Assignee   string    `json:"assignee"`
-	IssueType  string    `json:"issue_type"`
-	Resolution string    `json:"resolution"`
-	Link       string    `json:"link"`
-	QAContact  string    `json:"qa_contact"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	Key        string `json:"key"`
+	Summary    string `json:"summary"`
+	Status     string `json:"status"`
+	Priority   string `json:"priority"`
+	Labels     string `json:"-"` // comma-separated
+	FixVersion string `json:"fix_version"`
+	Assignee   string `json:"assignee"`
+	IssueType  string `json:"issue_type"`
+	Link       string `json:"link"`
+	QAContact  string `json:"qa_contact"`
 }
 
 // IssueSummary provides aggregate counts of JIRA issues for a release.
@@ -129,33 +26,196 @@ type IssueSummary struct {
 	Verified int `json:"verified"`
 	Open     int `json:"open"`
 	CVEs     int `json:"cves"`
-	Bugs     int `json:"bugs"`
 }
 
 // ReleaseOverview is a combined view of a release with its issue summary,
-// readiness signal, and latest snapshot metadata.
+// readiness signal, and the age of its current component set.
 type ReleaseOverview struct {
 	Release      ReleaseVersion    `json:"release"`
 	IssueSummary *IssueSummary     `json:"issue_summary,omitempty"`
 	Readiness    ReadinessResponse `json:"readiness"`
-	Snapshot     *SnapshotRecord   `json:"snapshot,omitempty"`
+	LatestBuild  *time.Time        `json:"latest_build,omitempty"`
+	// Shipped is set when the catalog published the version's tag or JIRA
+	// marks it released.
+	Shipped bool `json:"shipped"`
+	// NextInStream marks the lowest unshipped z of its product and major.minor.
+	NextInStream bool `json:"next_in_stream"`
+}
+
+// ReleaseSnapshotPage is one newest-first page of a release's Snapshots.
+type ReleaseSnapshotPage struct {
+	Snapshots []ReleaseSnapshot `json:"snapshots"`
+	HasMore   bool              `json:"has_more"`
+}
+
+// ReleaseSnapshot is one Konflux Snapshot of a release's applications with the
+// Konflux Releases that name it. Missing marks a Snapshot a Release names that
+// is no longer stored; its CreatedAt is then the oldest Release's. ArtKind is
+// the art.redhat.com/kind (image or fbc) of a Snapshot ART built for an
+// assembly; only lists set it.
+type ReleaseSnapshot struct {
+	Application    string           `json:"-"`
+	Name           string           `json:"name"`
+	CreatedAt      time.Time        `json:"created_at"`
+	ComponentCount int              `json:"component_count"`
+	Missing        bool             `json:"missing,omitempty"`
+	ArtKind        string           `json:"art_kind,omitempty"`
+	Releases       []KonfluxRelease `json:"releases,omitempty"`
+	Components     []SnapshotImage  `json:"components,omitempty"`
+	FBCCatalog     *FBCCatalog      `json:"fbc_catalog,omitempty"`
+}
+
+// FBCCatalog compares a Quay Snapshot's quay-operator bundle with the
+// stable-X.Y channel of the newest quay-operator FBC catalog of its release.
+// Status is "current" when the channel references the bundle's digest,
+// "behind" when a fully read channel of digest refs does not, else "unknown".
+type FBCCatalog struct {
+	Status              string `json:"status"`
+	CatalogSnapshot     string `json:"catalog_snapshot"`
+	CatalogBundleImage  string `json:"catalog_bundle_image"`
+	SnapshotBundleImage string `json:"snapshot_bundle_image"`
+}
+
+// SnapshotImage is one component image exactly as a Snapshot records it.
+type SnapshotImage struct {
+	Name            string           `json:"name"`
+	Image           string           `json:"image"`
+	Art             *ArtBuild        `json:"art"`
+	PendingArtBuild *PendingArtBuild `json:"pending_art_build"`
+}
+
+// ArtBuild links a component image to its ART build history record and the
+// upstream commit it was built from.
+type ArtBuild struct {
+	NVR          string `json:"nvr"`
+	BuildURL     string `json:"build_url"`
+	UpstreamRepo string `json:"upstream_repo"`
+	UpstreamSHA  string `json:"upstream_sha"`
+}
+
+// PendingArtBuild is a newer ART build of a component, still running, from a
+// different upstream commit than the Snapshot's image.
+type PendingArtBuild struct {
+	BuildURL    string    `json:"build_url"`
+	UpstreamSHA string    `json:"upstream_sha"`
+	StartedAt   time.Time `json:"started_at"`
+}
+
+// BuildAttempts is a release's ART image-build attempts whose start time
+// falls in the span ART history was read without a gap, newest first.
+// CoveredFrom is null when it was never read.
+type BuildAttempts struct {
+	CoveredFrom *time.Time     `json:"covered_from"`
+	Attempts    []BuildAttempt `json:"attempts"`
+}
+
+// BuildAttempt is one ART image build. Component is its NVR name.
+type BuildAttempt struct {
+	Component string    `json:"component"`
+	Outcome   string    `json:"outcome"`
+	StartedAt time.Time `json:"started_at"`
+	BuildURL  string    `json:"build_url"`
 }
 
 // ReadinessResponse represents the computed readiness signal for a release.
 type ReadinessResponse struct {
 	Signal  string `json:"signal"`  // "green", "yellow", "red"
 	Message string `json:"message"` // human-readable reason
+	// Shipped is set when JIRA marks it released or the catalog published it.
+	Shipped bool `json:"shipped"`
 }
 
 // ReleaseVersion represents a JIRA fixVersion with release metadata.
 type ReleaseVersion struct {
 	Name                  string     `json:"name"`
-	Description           string     `json:"description"`
 	ReleaseDate           *time.Time `json:"release_date,omitempty"`
 	Released              bool       `json:"released"`
-	Archived              bool       `json:"archived"`
+	Archived              bool       `json:"-"`
 	ReleaseTicketKey      string     `json:"release_ticket_key,omitempty"`
 	ReleaseTicketAssignee string     `json:"release_ticket_assignee,omitempty"`
-	S3Application         string     `json:"s3_application,omitempty"`
+	KonfluxApplication    string     `json:"konflux_application,omitempty"`
 	DueDate               *time.Time `json:"due_date,omitempty"`
+}
+
+// KonfluxRelease is a Konflux Release custom resource, distinct from the JIRA
+// ReleaseVersion.
+type KonfluxRelease struct {
+	Name           string     `json:"name"`
+	Application    string     `json:"-"`
+	Snapshot       string     `json:"-"`
+	ReleasePlan    string     `json:"release_plan"`
+	ReleasedStatus string     `json:"released_status"`
+	ReleasedReason string     `json:"released_reason"`
+	FailedTask     string     `json:"failed_task,omitempty"`
+	FailedStep     string     `json:"failed_step,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	StartTime      *time.Time `json:"start_time,omitempty"`
+	CompletionTime *time.Time `json:"completion_time,omitempty"`
+}
+
+// StagedSnapshots is the newest image Konflux Snapshot and each operator's
+// newest FBC Snapshot that ART staged for a release's assembly; each is null
+// when ART staged none. StreamStaged is whether ART staged any version of the
+// release's X.Y stream.
+type StagedSnapshots struct {
+	StreamStaged bool            `json:"stream_staged"`
+	Image        *StagedSnapshot `json:"staged_image"`
+	Catalogs     []StagedCatalog `json:"catalogs"`
+}
+
+// StagedCatalog is an operator's newest staged FBC Snapshot.
+type StagedCatalog struct {
+	Operator string          `json:"operator"`
+	Staged   *StagedSnapshot `json:"staged"`
+}
+
+// StagedSnapshot is a Snapshot annotated art.redhat.com/env=stage with the
+// newest Konflux Release that names it, or null when none does.
+type StagedSnapshot struct {
+	Name      string          `json:"name"`
+	CreatedAt time.Time       `json:"created_at"`
+	Release   *KonfluxRelease `json:"release"`
+}
+
+// SelectedBuild is a staged image Snapshot of a concrete version whose
+// Konflux Release through a STAGE ReleasePlan succeeded.
+// CompletedAt is that Release's completion time.
+type SelectedBuild struct {
+	SnapshotName string                   `json:"snapshot"`
+	CompletedAt  time.Time                `json:"completed_at"`
+	Components   []SelectedBuildComponent `json:"-"`
+}
+
+// SelectedBuildComponent is one image of a selected build with the upstream
+// commit ART built it from; both are empty when ART has not resolved it.
+type SelectedBuildComponent struct {
+	Name, UpstreamRepo, UpstreamSHA string
+}
+
+// BuildTickets is a release's tickets with the commits of its selected STAGE
+// build that name each. Build is nil with Reason set when none is selected.
+type BuildTickets struct {
+	Build       *SelectedBuild `json:"build"`
+	Reason      string         `json:"reason,omitempty"`
+	NotCompared []NotCompared  `json:"not_compared"`
+	Tickets     []BuildTicket  `json:"tickets"`
+}
+
+// NotCompared is a selected build component whose commits were not read.
+type NotCompared struct {
+	Component string `json:"component"`
+	Reason    string `json:"reason"`
+}
+
+// BuildTicket is a JIRA issue with the build commits whose message names it.
+type BuildTicket struct {
+	JiraIssueRecord
+	InBuild []BuildCommit `json:"in_build"`
+}
+
+// BuildCommit is an upstream commit in one component of a build.
+type BuildCommit struct {
+	Component string `json:"component"`
+	CommitSHA string `json:"commit_sha"`
+	CommitURL string `json:"commit_url"`
 }

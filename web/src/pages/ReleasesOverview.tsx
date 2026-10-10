@@ -8,7 +8,6 @@ import {
 	DescriptionListTerm,
 	EmptyState,
 	EmptyStateBody,
-	ExpandableSection,
 	Flex,
 	FlexItem,
 	Gallery,
@@ -16,8 +15,8 @@ import {
 	PageSection,
 	Progress,
 	ProgressMeasureLocation,
-	SearchInput,
 	Spinner,
+	Switch,
 	Title,
 	ToggleGroup,
 	ToggleGroupItem,
@@ -25,6 +24,7 @@ import {
 	ToolbarContent,
 	ToolbarGroup,
 	ToolbarItem,
+	Tooltip,
 } from "@patternfly/react-core";
 import {
 	CheckCircleIcon,
@@ -33,28 +33,24 @@ import {
 	ListIcon,
 	ThIcon,
 } from "@patternfly/react-icons";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { listReleasesOverview } from "../api/client";
 import type {
 	IssueSummary,
 	ReadinessResponse,
-	ReleaseOverview,
 	ReleaseVersion,
-	SnapshotRecord,
 } from "../api/types";
 import { seedCache, useCachedFetch } from "../hooks/useCachedFetch";
 import { useConfig } from "../hooks/useConfig";
 import { formatReleaseName, jiraIssueUrl } from "../utils/links";
 
-type SignalFilter = "all" | "red" | "yellow" | "green";
 type ViewMode = "compact" | "expanded";
 
 export default function ReleasesOverview() {
 	const [searchParams, setSearchParams] = useSearchParams();
-	const query = searchParams.get("q") ?? "";
-	const signalFilter = (searchParams.get("signal") ?? "all") as SignalFilter;
 	const viewMode = (searchParams.get("view") ?? "compact") as ViewMode;
+	const showAll = searchParams.get("all") === "1";
 
 	const config = useConfig();
 
@@ -67,17 +63,14 @@ export default function ReleasesOverview() {
 	useEffect(() => {
 		if (!overviews) return;
 		for (const ov of overviews) {
-			seedCache(`issueSummary:${ov.release.name}`, ov.issue_summary);
 			seedCache(`readiness:${ov.release.name}`, ov.readiness);
 		}
 	}, [overviews]);
 
-	const [releasedExpanded, setReleasedExpanded] = useState(false);
-
 	const setParam = (key: string, value: string) => {
 		setSearchParams((prev) => {
 			const next = new URLSearchParams(prev);
-			if (value && value !== "all" && value !== "compact") {
+			if (value && value !== "compact") {
 				next.set(key, value);
 			} else {
 				next.delete(key);
@@ -96,9 +89,13 @@ export default function ReleasesOverview() {
 		);
 	}
 
-	const overviewList = overviews ?? [];
-	const active = overviewList.filter((ov) => !ov.release.released);
-	const released = overviewList.filter((ov) => ov.release.released);
+	const overviewList = [...(overviews ?? [])].sort((a, b) =>
+		b.release.name.localeCompare(a.release.name, undefined, { numeric: true }),
+	);
+	// Only the next z-release of each stream, unless every version is asked for.
+	const visible = showAll
+		? overviewList
+		: overviewList.filter((ov) => ov.next_in_stream);
 
 	if (overviewList.length === 0) {
 		return (
@@ -119,44 +116,17 @@ export default function ReleasesOverview() {
 
 	const galleryMinWidth = viewMode === "compact" ? "300px" : "400px";
 
-	const filterOverview = (ov: ReleaseOverview): boolean => {
-		const displayName = formatReleaseName(ov.release.name);
-		if (
-			query &&
-			!displayName.toLowerCase().includes(query.toLowerCase()) &&
-			!ov.release.name.toLowerCase().includes(query.toLowerCase())
-		) {
-			return false;
-		}
-		if (signalFilter !== "all" && ov.readiness.signal !== signalFilter) {
-			return false;
-		}
-		return true;
-	};
-
 	return (
 		<PageSection>
 			<Toolbar>
 				<ToolbarContent>
 					<ToolbarItem>
-						<SearchInput
-							placeholder="Filter releases..."
-							value={query}
-							onChange={(_e, val) => setParam("q", val)}
-							onClear={() => setParam("q", "")}
+						<Switch
+							id="show-all-versions"
+							label="Show all versions"
+							isChecked={showAll}
+							onChange={(_e, checked) => setParam("all", checked ? "1" : "")}
 						/>
-					</ToolbarItem>
-					<ToolbarItem>
-						<ToggleGroup aria-label="Signal filter">
-							{(["all", "red", "yellow", "green"] as const).map((s) => (
-								<ToggleGroupItem
-									key={s}
-									text={s.charAt(0).toUpperCase() + s.slice(1)}
-									isSelected={signalFilter === s}
-									onChange={() => setParam("signal", s)}
-								/>
-							))}
-						</ToggleGroup>
 					</ToolbarItem>
 					<ToolbarGroup align={{ default: "alignEnd" }}>
 						<ToolbarItem>
@@ -180,41 +150,19 @@ export default function ReleasesOverview() {
 			</Toolbar>
 
 			<Gallery hasGutter minWidths={{ default: galleryMinWidth }}>
-				{active.filter(filterOverview).map((ov) => (
+				{visible.map((ov) => (
 					<ReleaseCard
 						key={ov.release.name}
 						release={ov.release}
 						issueSummary={ov.issue_summary}
 						readinessSignal={ov.readiness}
-						snapshot={ov.snapshot}
+						latestBuild={ov.latest_build}
+						shipped={ov.shipped}
 						viewMode={viewMode}
 						jiraBaseUrl={config?.jira_base_url}
 					/>
 				))}
 			</Gallery>
-
-			{released.length > 0 && (
-				<ExpandableSection
-					toggleText={`Released (${released.length})`}
-					isExpanded={releasedExpanded}
-					onToggle={(_e, val) => setReleasedExpanded(val)}
-					style={{ marginTop: "1.5rem" }}
-				>
-					<Gallery hasGutter minWidths={{ default: galleryMinWidth }}>
-						{released.filter(filterOverview).map((ov) => (
-							<ReleaseCard
-								key={ov.release.name}
-								release={ov.release}
-								issueSummary={ov.issue_summary}
-								readinessSignal={ov.readiness}
-								snapshot={ov.snapshot}
-								viewMode={viewMode}
-								jiraBaseUrl={config?.jira_base_url}
-							/>
-						))}
-					</Gallery>
-				</ExpandableSection>
-			)}
 		</PageSection>
 	);
 }
@@ -223,14 +171,16 @@ function ReleaseCard({
 	release,
 	issueSummary,
 	readinessSignal,
-	snapshot,
+	latestBuild,
+	shipped,
 	viewMode,
 	jiraBaseUrl,
 }: {
 	release: ReleaseVersion;
 	issueSummary?: IssueSummary;
 	readinessSignal?: ReadinessResponse;
-	snapshot?: SnapshotRecord;
+	latestBuild?: string;
+	shipped: boolean;
 	viewMode: ViewMode;
 	jiraBaseUrl?: string;
 }) {
@@ -255,6 +205,14 @@ function ReleaseCard({
 			? Math.round((issueSummary.verified / issueSummary.total) * 100)
 			: 0;
 
+	const lastBuild = latestBuild ? (
+		<Tooltip content="Newest Konflux snapshot for this version's applications.">
+			<span>{new Date(latestBuild).toLocaleDateString()}</span>
+		</Tooltip>
+	) : (
+		"None yet"
+	);
+
 	const navigate = useNavigate();
 	const displayName = formatReleaseName(release.name);
 
@@ -278,9 +236,20 @@ function ReleaseCard({
 					justifyContent={{ default: "justifyContentSpaceBetween" }}
 					alignItems={{ default: "alignItemsCenter" }}
 				>
-					<FlexItem>{displayName}</FlexItem>
 					<FlexItem>
-						{readinessSignal && (
+						{displayName}
+						{shipped && !release.released && (
+							<Tooltip content="The JIRA release ticket is still open: ticket hygiene, not release risk.">
+								<Label isCompact color="blue" style={{ marginLeft: "0.5rem" }}>
+									Shipped, ticket still open
+								</Label>
+							</Tooltip>
+						)}
+					</FlexItem>
+					<FlexItem>
+						{/* A shipped release with an open JIRA ticket shows only its shipped
+						    badge: the readiness signal would only reflect the stale ticket. */}
+						{readinessSignal && !(shipped && !release.released) && (
 							<Label
 								color={
 									signalColor === "green"
@@ -311,6 +280,12 @@ function ReleaseCard({
 								</DescriptionListDescription>
 							</DescriptionListGroup>
 						)}
+						<DescriptionListGroup>
+							<DescriptionListTerm>Last build</DescriptionListTerm>
+							<DescriptionListDescription>
+								{lastBuild}
+							</DescriptionListDescription>
+						</DescriptionListGroup>
 						{release.release_ticket_key && (
 							<DescriptionListGroup>
 								<DescriptionListTerm>Ticket</DescriptionListTerm>
@@ -320,35 +295,12 @@ function ReleaseCard({
 											href={ticketLink}
 											target="_blank"
 											rel="noopener noreferrer"
+											style={{ textDecoration: "none" }}
 										>
 											{release.release_ticket_key}
 										</a>
 									) : (
 										release.release_ticket_key
-									)}
-								</DescriptionListDescription>
-							</DescriptionListGroup>
-						)}
-						{snapshot && (
-							<DescriptionListGroup>
-								<DescriptionListTerm>Tests</DescriptionListTerm>
-								<DescriptionListDescription>
-									{!snapshot.has_tests ? (
-										<Label color="grey" isCompact>
-											N/A
-										</Label>
-									) : snapshot.tests_passed ? (
-										<Label color="green" icon={<CheckCircleIcon />} isCompact>
-											Passed
-										</Label>
-									) : (
-										<Label
-											color="red"
-											icon={<ExclamationCircleIcon />}
-											isCompact
-										>
-											Failed
-										</Label>
 									)}
 								</DescriptionListDescription>
 							</DescriptionListGroup>
@@ -373,6 +325,7 @@ function ReleaseCard({
 													href={ticketLink}
 													target="_blank"
 													rel="noopener noreferrer"
+													style={{ textDecoration: "none" }}
 												>
 													{release.release_ticket_key}
 												</a>
@@ -382,34 +335,10 @@ function ReleaseCard({
 										</div>
 									</FlexItem>
 								)}
-								{snapshot && (
-									<FlexItem>
-										<span className="rr-label">Tests</span>
-										<div>
-											{!snapshot.has_tests ? (
-												<Label color="grey" isCompact>
-													N/A
-												</Label>
-											) : snapshot.tests_passed ? (
-												<Label
-													color="green"
-													icon={<CheckCircleIcon />}
-													isCompact
-												>
-													Passed
-												</Label>
-											) : (
-												<Label
-													color="red"
-													icon={<ExclamationCircleIcon />}
-													isCompact
-												>
-													Failed
-												</Label>
-											)}
-										</div>
-									</FlexItem>
-								)}
+								<FlexItem>
+									<span className="rr-label">Last build</span>
+									<div>{lastBuild}</div>
+								</FlexItem>
 								{issueSummary && issueSummary.cves > 0 && (
 									<FlexItem>
 										<span className="rr-label">CVEs</span>

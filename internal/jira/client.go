@@ -17,7 +17,8 @@ import (
 
 // Config holds JIRA connection settings.
 type Config struct {
-	BaseURL        string // e.g. https://redhat.atlassian.net
+	BaseURL        string // REST API base, e.g. https://redhat.atlassian.net
+	SiteURL        string // browse-link base; defaults to BaseURL
 	Email          string // JIRA Cloud account email for Basic Auth
 	Token          string // JIRA Cloud API token
 	Project        string // e.g. PROJQUAY
@@ -27,6 +28,7 @@ type Config struct {
 // Client is a JIRA REST API client.
 type Client struct {
 	baseURL        string
+	siteURL        string
 	email          string
 	token          string
 	project        string
@@ -37,8 +39,13 @@ type Client struct {
 
 // New creates a new JIRA client.
 func New(cfg Config) *Client {
+	siteURL := cfg.SiteURL
+	if siteURL == "" {
+		siteURL = cfg.BaseURL
+	}
 	return &Client{
 		baseURL:        strings.TrimRight(cfg.BaseURL, "/"),
+		siteURL:        strings.TrimRight(siteURL, "/"),
 		email:          cfg.Email,
 		token:          cfg.Token,
 		project:        cfg.Project,
@@ -59,17 +66,13 @@ type Issue struct {
 
 // IssueFields holds the fields we care about from a JIRA issue.
 type IssueFields struct {
-	Summary     string           `json:"summary"`
-	Status      StatusField      `json:"status"`
-	Priority    PriorityField    `json:"priority"`
-	Labels      []string         `json:"labels"`
-	FixVersions []VersionField   `json:"fixVersions"`
-	Assignee    *UserField       `json:"assignee"`
-	IssueType   TypeField        `json:"issuetype"`
-	Resolution  *ResField        `json:"resolution"`
-	Updated     string           `json:"updated"`
-	DueDate     string           `json:"duedate"`
-	Components  []ComponentField `json:"components"`
+	Summary   string        `json:"summary"`
+	Status    StatusField   `json:"status"`
+	Priority  PriorityField `json:"priority"`
+	Labels    []string      `json:"labels"`
+	Assignee  *UserField    `json:"assignee"`
+	IssueType TypeField     `json:"issuetype"`
+	DueDate   string        `json:"duedate"`
 
 	Raw map[string]json.RawMessage `json:"-"`
 }
@@ -94,7 +97,6 @@ type PriorityField struct {
 
 type VersionField struct {
 	Name        string `json:"name"`
-	Description string `json:"description"`
 	ReleaseDate string `json:"releaseDate"`
 	Released    bool   `json:"released"`
 	Archived    bool   `json:"archived"`
@@ -108,40 +110,32 @@ type TypeField struct {
 	Name string `json:"name"`
 }
 
-type ResField struct {
-	Name string `json:"name"`
-}
-
-type ComponentField struct {
-	Name string `json:"name"`
-}
-
 type searchResponse struct {
 	NextPageToken string  `json:"nextPageToken,omitempty"`
-	MaxResults    int     `json:"maxResults"`
 	Issues        []Issue `json:"issues"`
 }
 
 // ActiveRelease represents a release discovered from JIRA via the -area/release component.
 type ActiveRelease struct {
-	FixVersion       string     // e.g. "quay-v3.16.3"
-	DueDate          *time.Time // from the release ticket's dueDate field
-	ReleaseTicketKey string     // e.g. "PROJQUAY-10276"
-	Assignee         string     // display name of the release ticket assignee
-	S3Application    string     // e.g. "quay-v3-16" (derived from fixVersion)
+	FixVersion         string     // e.g. "quay-v3.16.3"
+	DueDate            *time.Time // from the release ticket's dueDate field
+	ReleaseTicketKey   string     // e.g. "PROJQUAY-10276"
+	Assignee           string     // display name of the release ticket assignee
+	KonfluxApplication string     // e.g. "quay-3-16" (derived from fixVersion)
 }
 
-// BaseURL returns the configured JIRA base URL.
-func (c *Client) BaseURL() string {
-	return c.baseURL
+// SiteURL returns the JIRA site URL used for browse links.
+func (c *Client) SiteURL() string {
+	return c.siteURL
 }
 
-// versionRe matches version patterns like "v3.16.2", "v2.0.10", "3.16.2" in release ticket summaries.
+// versionRe matches a known product followed by a version in release ticket summaries.
+// A version without a known product, e.g. "fix was not included in 3.17.3", does not match.
 // Examples:
 //   - "Release Quay v3.16.2"       → product="quay", version="3.16.2"
 //   - "Release OMR v2.0.10"        → product="omr", version="2.0.10"
 //   - "⦗konflux⦘ Quay v3.15.3"    → product="quay", version="3.15.3"
-var versionRe = regexp.MustCompile(`(?i)(?:(\w+)\s+)?v?(\d+\.\d+(?:\.\d+)?)`)
+var versionRe = regexp.MustCompile(`(?i)\b(quay|omr)\s+v?(\d+\.\d+(?:\.\d+)?)`)
 
 // ParseVersionFromSummary extracts the product and version from a release ticket summary.
 // Returns product (lowercased), version string, and whether a match was found.
@@ -163,7 +157,7 @@ func (c *Client) DiscoverActiveReleases(ctx context.Context) ([]ActiveRelease, e
 		`project=%s AND component="-area/release" AND status NOT IN (Closed, Done)`,
 		c.project,
 	)
-	fields := "summary,status,fixVersions,duedate,components,assignee"
+	fields := "summary,status,duedate,assignee"
 
 	var allIssues []Issue
 	nextPageToken := ""
@@ -205,15 +199,7 @@ func (c *Client) DiscoverActiveReleases(ctx context.Context) ([]ActiveRelease, e
 		}
 
 		// JIRA fixVersions always use "{product}-v{version}" format (e.g. "quay-v3.16.2", "omr-v2.0.10")
-		fixVersion := version
-		if product != "" && product != "release" {
-			fixVersion = product + "-v" + version
-		}
-
-		s3App := FixVersionToS3App(fixVersion)
-		if s3App == "" {
-			continue
-		}
+		fixVersion := product + "-v" + version
 
 		assignee := ""
 		if issue.Fields.Assignee != nil {
@@ -221,10 +207,10 @@ func (c *Client) DiscoverActiveReleases(ctx context.Context) ([]ActiveRelease, e
 		}
 
 		rel := ActiveRelease{
-			FixVersion:       fixVersion,
-			ReleaseTicketKey: issue.Key,
-			Assignee:         assignee,
-			S3Application:    s3App,
+			FixVersion:         fixVersion,
+			ReleaseTicketKey:   issue.Key,
+			Assignee:           assignee,
+			KonfluxApplication: FixVersionToKonfluxApp(fixVersion),
 		}
 
 		if issue.Fields.DueDate != "" {
@@ -250,7 +236,7 @@ func (c *Client) buildSearchJQL(version string) string {
 // It handles pagination automatically and respects rate limits.
 func (c *Client) SearchIssues(ctx context.Context, fixVersion string) ([]Issue, error) {
 	jql := c.buildSearchJQL(fixVersion)
-	fields := "summary,status,priority,labels,assignee,issuetype,resolution,updated"
+	fields := "summary,status,priority,labels,assignee,issuetype"
 	if c.qaContactField != "" {
 		fields += "," + c.qaContactField
 	}
@@ -398,6 +384,12 @@ func (c *Client) doGet(ctx context.Context, reqURL string) ([]byte, error) {
 		return nil, fmt.Errorf("JIRA API returned %d: %s", resp.StatusCode, string(body[:min(len(body), 200)]))
 	}
 
+	// Atlassian Cloud answers a rejected token with a 200 served anonymously,
+	// which would look like an empty project and wipe the stored issues.
+	if resp.Header.Get("X-Seraph-LoginReason") == "AUTHENTICATED_FAILED" {
+		return nil, fmt.Errorf("JIRA API returned %d: token rejected (X-Seraph-LoginReason: AUTHENTICATED_FAILED)", http.StatusUnauthorized)
+	}
+
 	return body, nil
 }
 
@@ -429,26 +421,28 @@ func parseRetryAfter(err error) time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
-// FixVersionToS3App maps a JIRA fixVersion to an S3 application prefix.
-// It handles two formats:
-//   - Plain semver: "3.16.3" → "quay-v3-16" (defaults to "quay" product)
-//   - Prefixed:     "omr-v2.0.10" → "omr-v2-0" (product parsed from prefix)
-func FixVersionToS3App(fixVersion string) string {
-	// Check for "{product}-v{version}" format (e.g. "omr-v2.0.10")
+var streamVersion = regexp.MustCompile(`^([a-z]+-v\d+\.\d+)\.\d+$`)
+
+// StreamVersion returns the generic Target Version of fixVersion's stream,
+// "quay-v3.16.2" → "quay-v3.16.z", or "" when fixVersion is not product-vX.Y.Z.
+func StreamVersion(fixVersion string) string {
+	m := streamVersion.FindStringSubmatch(fixVersion)
+	if m == nil {
+		return ""
+	}
+	return m[1] + ".z"
+}
+
+// FixVersionToKonfluxApp maps a "{product}-v{version}" JIRA fixVersion to its
+// Konflux application name, e.g. "omr-v2.0.10" → "omr-2-0".
+func FixVersionToKonfluxApp(fixVersion string) string {
 	if idx := strings.Index(fixVersion, "-v"); idx > 0 {
 		product := fixVersion[:idx]
 		version := fixVersion[idx+2:] // skip "-v"
 		parts := strings.Split(version, ".")
 		if len(parts) >= 2 {
-			return fmt.Sprintf("%s-v%s-%s", product, parts[0], parts[1])
+			return fmt.Sprintf("%s-%s-%s", product, parts[0], parts[1])
 		}
-		return ""
-	}
-
-	// Plain semver: "3.16.3" → "quay-v3-16"
-	parts := strings.Split(fixVersion, ".")
-	if len(parts) >= 2 {
-		return fmt.Sprintf("quay-v%s-%s", parts[0], parts[1])
 	}
 	return ""
 }

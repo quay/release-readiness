@@ -7,27 +7,22 @@ package dbsqlc
 
 import (
 	"context"
+	"strings"
 )
 
 const createSnapshot = `-- name: CreateSnapshot :execlastid
-INSERT INTO snapshots (application, name, tests_passed, created_at)
-VALUES (?, ?, ?, ?)
+INSERT INTO snapshots (application, name, created_at)
+VALUES (?, ?, ?)
 `
 
 type CreateSnapshotParams struct {
 	Application string
 	Name        string
-	TestsPassed int64
 	CreatedAt   string
 }
 
 func (q *Queries) CreateSnapshot(ctx context.Context, arg CreateSnapshotParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, createSnapshot,
-		arg.Application,
-		arg.Name,
-		arg.TestsPassed,
-		arg.CreatedAt,
-	)
+	result, err := q.db.ExecContext(ctx, createSnapshot, arg.Application, arg.Name, arg.CreatedAt)
 	if err != nil {
 		return 0, err
 	}
@@ -35,199 +30,23 @@ func (q *Queries) CreateSnapshot(ctx context.Context, arg CreateSnapshotParams) 
 }
 
 const createSnapshotComponent = `-- name: CreateSnapshotComponent :exec
-INSERT INTO snapshot_components (snapshot_id, component, git_sha, image_url, git_url)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO snapshot_components (snapshot_id, component, image_url)
+VALUES (?, ?, ?)
 `
 
 type CreateSnapshotComponentParams struct {
 	SnapshotID int64
 	Component  string
-	GitSha     string
 	ImageUrl   string
-	GitUrl     string
 }
 
 func (q *Queries) CreateSnapshotComponent(ctx context.Context, arg CreateSnapshotComponentParams) error {
-	_, err := q.db.ExecContext(ctx, createSnapshotComponent,
-		arg.SnapshotID,
-		arg.Component,
-		arg.GitSha,
-		arg.ImageUrl,
-		arg.GitUrl,
-	)
+	_, err := q.db.ExecContext(ctx, createSnapshotComponent, arg.SnapshotID, arg.Component, arg.ImageUrl)
 	return err
-}
-
-const createTestCase = `-- name: CreateTestCase :exec
-INSERT INTO test_cases (test_suite_id, name, status, duration_ms, message, trace, file_path, suite, retries, flaky)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`
-
-type CreateTestCaseParams struct {
-	TestSuiteID int64
-	Name        string
-	Status      string
-	DurationMs  float64
-	Message     string
-	Trace       string
-	FilePath    string
-	Suite       string
-	Retries     int64
-	Flaky       int64
-}
-
-func (q *Queries) CreateTestCase(ctx context.Context, arg CreateTestCaseParams) error {
-	_, err := q.db.ExecContext(ctx, createTestCase,
-		arg.TestSuiteID,
-		arg.Name,
-		arg.Status,
-		arg.DurationMs,
-		arg.Message,
-		arg.Trace,
-		arg.FilePath,
-		arg.Suite,
-		arg.Retries,
-		arg.Flaky,
-	)
-	return err
-}
-
-const createTestSuite = `-- name: CreateTestSuite :execlastid
-INSERT INTO test_suites (snapshot_id, name, status, pipeline_run, tool_name, tool_version, tests, passed, failed, skipped, pending, other, flaky, start_time, stop_time, duration_ms)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`
-
-type CreateTestSuiteParams struct {
-	SnapshotID  int64
-	Name        string
-	Status      string
-	PipelineRun string
-	ToolName    string
-	ToolVersion string
-	Tests       int64
-	Passed      int64
-	Failed      int64
-	Skipped     int64
-	Pending     int64
-	Other       int64
-	Flaky       int64
-	StartTime   int64
-	StopTime    int64
-	DurationMs  int64
-}
-
-func (q *Queries) CreateTestSuite(ctx context.Context, arg CreateTestSuiteParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, createTestSuite,
-		arg.SnapshotID,
-		arg.Name,
-		arg.Status,
-		arg.PipelineRun,
-		arg.ToolName,
-		arg.ToolVersion,
-		arg.Tests,
-		arg.Passed,
-		arg.Failed,
-		arg.Skipped,
-		arg.Pending,
-		arg.Other,
-		arg.Flaky,
-		arg.StartTime,
-		arg.StopTime,
-		arg.DurationMs,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.LastInsertId()
-}
-
-const createVulnerability = `-- name: CreateVulnerability :exec
-INSERT INTO vulnerabilities (report_id, name, severity, package_name, package_version, fixed_in_version, description, link)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-`
-
-type CreateVulnerabilityParams struct {
-	ReportID       int64
-	Name           string
-	Severity       string
-	PackageName    string
-	PackageVersion string
-	FixedInVersion string
-	Description    string
-	Link           string
-}
-
-func (q *Queries) CreateVulnerability(ctx context.Context, arg CreateVulnerabilityParams) error {
-	_, err := q.db.ExecContext(ctx, createVulnerability,
-		arg.ReportID,
-		arg.Name,
-		arg.Severity,
-		arg.PackageName,
-		arg.PackageVersion,
-		arg.FixedInVersion,
-		arg.Description,
-		arg.Link,
-	)
-	return err
-}
-
-const createVulnerabilityReport = `-- name: CreateVulnerabilityReport :execlastid
-INSERT INTO vulnerability_reports (snapshot_id, component, arch, total, critical, high, medium, low, unknown, fixable)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`
-
-type CreateVulnerabilityReportParams struct {
-	SnapshotID int64
-	Component  string
-	Arch       string
-	Total      int64
-	Critical   int64
-	High       int64
-	Medium     int64
-	Low        int64
-	Unknown    int64
-	Fixable    int64
-}
-
-func (q *Queries) CreateVulnerabilityReport(ctx context.Context, arg CreateVulnerabilityReportParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, createVulnerabilityReport,
-		arg.SnapshotID,
-		arg.Component,
-		arg.Arch,
-		arg.Total,
-		arg.Critical,
-		arg.High,
-		arg.Medium,
-		arg.Low,
-		arg.Unknown,
-		arg.Fixable,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.LastInsertId()
-}
-
-const getSnapshotByID = `-- name: GetSnapshotByID :one
-SELECT id, application, name, tests_passed, created_at
-FROM snapshots WHERE id = ?
-`
-
-func (q *Queries) GetSnapshotByID(ctx context.Context, id int64) (Snapshot, error) {
-	row := q.db.QueryRowContext(ctx, getSnapshotByID, id)
-	var i Snapshot
-	err := row.Scan(
-		&i.ID,
-		&i.Application,
-		&i.Name,
-		&i.TestsPassed,
-		&i.CreatedAt,
-	)
-	return i, err
 }
 
 const getSnapshotRow = `-- name: GetSnapshotRow :one
-SELECT id, application, name, tests_passed, created_at
+SELECT id, application, name, created_at
 FROM snapshots WHERE name = ?
 `
 
@@ -238,68 +57,54 @@ func (q *Queries) GetSnapshotRow(ctx context.Context, name string) (Snapshot, er
 		&i.ID,
 		&i.Application,
 		&i.Name,
-		&i.TestsPassed,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
-const getTestSuiteByID = `-- name: GetTestSuiteByID :one
-SELECT id, snapshot_id, name FROM test_suites WHERE id = ?
+const listComponentCandidates = `-- name: ListComponentCandidates :many
+SELECT sc.id, sc.component, sc.image_url,
+       s.id AS snapshot_id, s.application, s.created_at
+FROM snapshot_components sc
+JOIN snapshots s ON s.id = sc.snapshot_id
+WHERE s.application IN (/*SLICE:applications*/?)
 `
 
-type GetTestSuiteByIDRow struct {
-	ID         int64
-	SnapshotID int64
-	Name       string
-}
-
-func (q *Queries) GetTestSuiteByID(ctx context.Context, id int64) (GetTestSuiteByIDRow, error) {
-	row := q.db.QueryRowContext(ctx, getTestSuiteByID, id)
-	var i GetTestSuiteByIDRow
-	err := row.Scan(&i.ID, &i.SnapshotID, &i.Name)
-	return i, err
-}
-
-const latestSnapshotPerApplication = `-- name: LatestSnapshotPerApplication :many
-SELECT s.id, s.application, s.name, s.tests_passed, s.created_at, CAST(counts.cnt AS INTEGER) AS cnt,
-       (SELECT COUNT(*) FROM test_suites WHERE snapshot_id = s.id) AS test_count
-FROM snapshots s
-JOIN (
-    SELECT application, MAX(id) AS max_id, COUNT(*) AS cnt
-    FROM snapshots
-    GROUP BY application
-) counts ON s.id = counts.max_id
-ORDER BY s.application
-`
-
-type LatestSnapshotPerApplicationRow struct {
+type ListComponentCandidatesRow struct {
 	ID          int64
+	Component   string
+	ImageUrl    string
+	SnapshotID  int64
 	Application string
-	Name        string
-	TestsPassed int64
 	CreatedAt   string
-	Cnt         int64
-	TestCount   int64
 }
 
-func (q *Queries) LatestSnapshotPerApplication(ctx context.Context) ([]LatestSnapshotPerApplicationRow, error) {
-	rows, err := q.db.QueryContext(ctx, latestSnapshotPerApplication)
+func (q *Queries) ListComponentCandidates(ctx context.Context, applications []string) ([]ListComponentCandidatesRow, error) {
+	query := listComponentCandidates
+	var queryParams []interface{}
+	if len(applications) > 0 {
+		for _, v := range applications {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:applications*/?", strings.Repeat(",?", len(applications))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:applications*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []LatestSnapshotPerApplicationRow
+	var items []ListComponentCandidatesRow
 	for rows.Next() {
-		var i LatestSnapshotPerApplicationRow
+		var i ListComponentCandidatesRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.Component,
+			&i.ImageUrl,
+			&i.SnapshotID,
 			&i.Application,
-			&i.Name,
-			&i.TestsPassed,
 			&i.CreatedAt,
-			&i.Cnt,
-			&i.TestCount,
 		); err != nil {
 			return nil, err
 		}
@@ -314,32 +119,95 @@ func (q *Queries) LatestSnapshotPerApplication(ctx context.Context) ([]LatestSna
 	return items, nil
 }
 
-const listAllSnapshots = `-- name: ListAllSnapshots :many
-SELECT id, application, name, tests_passed, created_at
-FROM snapshots
-ORDER BY id DESC LIMIT ? OFFSET ?
+const listReleaseSnapshots = `-- name: ListReleaseSnapshots :many
+WITH candidates AS (
+    SELECT s.name, s.application, s.created_at,
+           (SELECT COUNT(*) FROM snapshot_components sc WHERE sc.snapshot_id = s.id) AS component_count,
+           0 AS missing
+    FROM snapshots s
+    WHERE s.application IN (/*SLICE:applications*/?)
+      AND (s.application != ?
+           OR EXISTS (SELECT 1 FROM snapshot_components sc
+                      WHERE sc.snapshot_id = s.id AND sc.component LIKE ?))
+      AND (? = 0 OR EXISTS (SELECT 1 FROM konflux_releases r
+                            WHERE r.snapshot = s.name AND r.application = s.application))
+    UNION ALL
+    SELECT r.snapshot, r.application, MIN(r.created_at), 0, 1
+    FROM konflux_releases r
+    WHERE r.application IN (/*SLICE:missing_applications*/?)
+      AND r.snapshot != ''
+      AND NOT EXISTS (SELECT 1 FROM snapshots s WHERE s.name = r.snapshot)
+    GROUP BY r.application, r.snapshot
+)
+SELECT c.name, c.application, c.created_at, c.component_count, c.missing,
+       COALESCE(ss.kind, '') AS art_kind
+FROM candidates c
+LEFT JOIN staged_snapshots ss ON ss.name = c.name
+ORDER BY c.created_at DESC, c.name DESC
+LIMIT ? OFFSET ?
 `
 
-type ListAllSnapshotsParams struct {
-	Limit  int64
-	Offset int64
+type ListReleaseSnapshotsParams struct {
+	Applications        []string
+	Application         string
+	Component           string
+	Column4             interface{}
+	MissingApplications []string
+	Limit               int64
+	Offset              int64
 }
 
-func (q *Queries) ListAllSnapshots(ctx context.Context, arg ListAllSnapshotsParams) ([]Snapshot, error) {
-	rows, err := q.db.QueryContext(ctx, listAllSnapshots, arg.Limit, arg.Offset)
+type ListReleaseSnapshotsRow struct {
+	Name           string
+	Application    string
+	CreatedAt      string
+	ComponentCount int64
+	Missing        int64
+	ArtKind        string
+}
+
+// Snapshots of the given applications, plus Snapshots a Release names that are
+// no longer stored (missing = 1). quay-images-base is shared across versions,
+// so its Snapshots count only with a component matching the LIKE pattern.
+func (q *Queries) ListReleaseSnapshots(ctx context.Context, arg ListReleaseSnapshotsParams) ([]ListReleaseSnapshotsRow, error) {
+	query := listReleaseSnapshots
+	var queryParams []interface{}
+	if len(arg.Applications) > 0 {
+		for _, v := range arg.Applications {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:applications*/?", strings.Repeat(",?", len(arg.Applications))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:applications*/?", "NULL", 1)
+	}
+	queryParams = append(queryParams, arg.Application)
+	queryParams = append(queryParams, arg.Component)
+	queryParams = append(queryParams, arg.Column4)
+	if len(arg.MissingApplications) > 0 {
+		for _, v := range arg.MissingApplications {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:missing_applications*/?", strings.Repeat(",?", len(arg.MissingApplications))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:missing_applications*/?", "NULL", 1)
+	}
+	queryParams = append(queryParams, arg.Limit)
+	queryParams = append(queryParams, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Snapshot
+	var items []ListReleaseSnapshotsRow
 	for rows.Next() {
-		var i Snapshot
+		var i ListReleaseSnapshotsRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.Application,
 			&i.Name,
-			&i.TestsPassed,
+			&i.Application,
 			&i.CreatedAt,
+			&i.ComponentCount,
+			&i.Missing,
+			&i.ArtKind,
 		); err != nil {
 			return nil, err
 		}
@@ -355,7 +223,7 @@ func (q *Queries) ListAllSnapshots(ctx context.Context, arg ListAllSnapshotsPara
 }
 
 const listSnapshotComponents = `-- name: ListSnapshotComponents :many
-SELECT id, snapshot_id, component, git_sha, image_url, git_url
+SELECT id, snapshot_id, component, image_url
 FROM snapshot_components
 WHERE snapshot_id = ?
 ORDER BY component
@@ -374,233 +242,7 @@ func (q *Queries) ListSnapshotComponents(ctx context.Context, snapshotID int64) 
 			&i.ID,
 			&i.SnapshotID,
 			&i.Component,
-			&i.GitSha,
 			&i.ImageUrl,
-			&i.GitUrl,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listSnapshotsByApplication = `-- name: ListSnapshotsByApplication :many
-SELECT id, application, name, tests_passed, created_at
-FROM snapshots
-WHERE application = ?
-ORDER BY id DESC LIMIT ? OFFSET ?
-`
-
-type ListSnapshotsByApplicationParams struct {
-	Application string
-	Limit       int64
-	Offset      int64
-}
-
-func (q *Queries) ListSnapshotsByApplication(ctx context.Context, arg ListSnapshotsByApplicationParams) ([]Snapshot, error) {
-	rows, err := q.db.QueryContext(ctx, listSnapshotsByApplication, arg.Application, arg.Limit, arg.Offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Snapshot
-	for rows.Next() {
-		var i Snapshot
-		if err := rows.Scan(
-			&i.ID,
-			&i.Application,
-			&i.Name,
-			&i.TestsPassed,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listTestCasesBySuite = `-- name: ListTestCasesBySuite :many
-SELECT id, test_suite_id, name, status, duration_ms, message, trace, file_path, suite, retries, flaky
-FROM test_cases
-WHERE test_suite_id = ?
-ORDER BY name
-`
-
-func (q *Queries) ListTestCasesBySuite(ctx context.Context, testSuiteID int64) ([]TestCase, error) {
-	rows, err := q.db.QueryContext(ctx, listTestCasesBySuite, testSuiteID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []TestCase
-	for rows.Next() {
-		var i TestCase
-		if err := rows.Scan(
-			&i.ID,
-			&i.TestSuiteID,
-			&i.Name,
-			&i.Status,
-			&i.DurationMs,
-			&i.Message,
-			&i.Trace,
-			&i.FilePath,
-			&i.Suite,
-			&i.Retries,
-			&i.Flaky,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listTestSuitesBySnapshot = `-- name: ListTestSuitesBySnapshot :many
-SELECT id, snapshot_id, name, status, pipeline_run, tool_name, tool_version, tests, passed, failed, skipped, pending, other, flaky, start_time, stop_time, duration_ms, created_at
-FROM test_suites
-WHERE snapshot_id = ?
-ORDER BY name
-`
-
-func (q *Queries) ListTestSuitesBySnapshot(ctx context.Context, snapshotID int64) ([]TestSuite, error) {
-	rows, err := q.db.QueryContext(ctx, listTestSuitesBySnapshot, snapshotID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []TestSuite
-	for rows.Next() {
-		var i TestSuite
-		if err := rows.Scan(
-			&i.ID,
-			&i.SnapshotID,
-			&i.Name,
-			&i.Status,
-			&i.PipelineRun,
-			&i.ToolName,
-			&i.ToolVersion,
-			&i.Tests,
-			&i.Passed,
-			&i.Failed,
-			&i.Skipped,
-			&i.Pending,
-			&i.Other,
-			&i.Flaky,
-			&i.StartTime,
-			&i.StopTime,
-			&i.DurationMs,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listVulnerabilitiesByReport = `-- name: ListVulnerabilitiesByReport :many
-SELECT id, report_id, name, severity, package_name, package_version, fixed_in_version, description, link
-FROM vulnerabilities
-WHERE report_id = ?
-ORDER BY
-    CASE severity
-        WHEN 'Critical' THEN 0
-        WHEN 'High' THEN 1
-        WHEN 'Medium' THEN 2
-        WHEN 'Low' THEN 3
-        ELSE 4
-    END,
-    name
-`
-
-func (q *Queries) ListVulnerabilitiesByReport(ctx context.Context, reportID int64) ([]Vulnerability, error) {
-	rows, err := q.db.QueryContext(ctx, listVulnerabilitiesByReport, reportID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Vulnerability
-	for rows.Next() {
-		var i Vulnerability
-		if err := rows.Scan(
-			&i.ID,
-			&i.ReportID,
-			&i.Name,
-			&i.Severity,
-			&i.PackageName,
-			&i.PackageVersion,
-			&i.FixedInVersion,
-			&i.Description,
-			&i.Link,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listVulnerabilityReportsBySnapshot = `-- name: ListVulnerabilityReportsBySnapshot :many
-SELECT id, snapshot_id, component, arch, total, critical, high, medium, low, unknown, fixable, created_at
-FROM vulnerability_reports
-WHERE snapshot_id = ?
-ORDER BY component, arch
-`
-
-func (q *Queries) ListVulnerabilityReportsBySnapshot(ctx context.Context, snapshotID int64) ([]VulnerabilityReport, error) {
-	rows, err := q.db.QueryContext(ctx, listVulnerabilityReportsBySnapshot, snapshotID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []VulnerabilityReport
-	for rows.Next() {
-		var i VulnerabilityReport
-		if err := rows.Scan(
-			&i.ID,
-			&i.SnapshotID,
-			&i.Component,
-			&i.Arch,
-			&i.Total,
-			&i.Critical,
-			&i.High,
-			&i.Medium,
-			&i.Low,
-			&i.Unknown,
-			&i.Fixable,
-			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

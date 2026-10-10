@@ -12,18 +12,21 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Health & Config
 	mux.HandleFunc("GET /api/v1/health", s.handleHealth)
 	mux.HandleFunc("GET /api/v1/config", s.handleConfig)
-
-	// Snapshots API
-	mux.HandleFunc("GET /api/v1/snapshots", s.handleListSnapshots)
-	mux.HandleFunc("GET /api/v1/snapshots/{snapshotId}/suites/{suiteId}/artifacts", s.handleDownloadSuiteArtifacts)
+	mux.HandleFunc("GET /api/v1/sync-status", s.handleSyncStatus)
 
 	// Releases API (version-centric)
 	mux.HandleFunc("GET /api/v1/releases/overview", s.handleReleasesOverview)
 	mux.HandleFunc("GET /api/v1/releases/{version}", s.handleGetRelease)
-	mux.HandleFunc("GET /api/v1/releases/{version}/snapshot", s.handleGetReleaseSnapshot)
+	mux.HandleFunc("GET /api/v1/releases/{version}/snapshots", s.handleListReleaseSnapshots)
+	mux.HandleFunc("GET /api/v1/releases/{version}/snapshots/{name}", s.handleGetReleaseSnapshot)
+	mux.HandleFunc("GET /api/v1/releases/{version}/snapshots/{name}/prow-runs", s.handleListSnapshotProwRuns)
 	mux.HandleFunc("GET /api/v1/releases/{version}/issues", s.handleListReleaseIssues)
 	mux.HandleFunc("GET /api/v1/releases/{version}/issues/summary", s.handleGetReleaseIssueSummary)
 	mux.HandleFunc("GET /api/v1/releases/{version}/readiness", s.handleGetReleaseReadiness)
+	mux.HandleFunc("GET /api/v1/releases/{version}/prow-runs", s.handleListReleaseProwRuns)
+	mux.HandleFunc("GET /api/v1/releases/{version}/build-attempts", s.handleListBuildAttempts)
+	mux.HandleFunc("GET /api/v1/releases/{version}/staged", s.handleGetStaged)
+	mux.HandleFunc("GET /api/v1/releases/{version}/build-tickets", s.handleGetBuildTickets)
 
 	// SPA — serve React app from embedded dist/
 	distSub, _ := fs.Sub(web.DistFS, "dist")

@@ -1,97 +1,57 @@
 -- name: CreateSnapshot :execlastid
-INSERT INTO snapshots (application, name, tests_passed, created_at)
-VALUES (?, ?, ?, ?);
+INSERT INTO snapshots (application, name, created_at)
+VALUES (?, ?, ?);
 
 -- name: SnapshotExistsByName :one
 SELECT COUNT(*) FROM snapshots WHERE name = ?;
 
 -- name: GetSnapshotRow :one
-SELECT id, application, name, tests_passed, created_at
+SELECT id, application, name, created_at
 FROM snapshots WHERE name = ?;
 
 -- name: CreateSnapshotComponent :exec
-INSERT INTO snapshot_components (snapshot_id, component, git_sha, image_url, git_url)
-VALUES (?, ?, ?, ?, ?);
+INSERT INTO snapshot_components (snapshot_id, component, image_url)
+VALUES (?, ?, ?);
 
 -- name: ListSnapshotComponents :many
-SELECT id, snapshot_id, component, git_sha, image_url, git_url
+SELECT id, snapshot_id, component, image_url
 FROM snapshot_components
 WHERE snapshot_id = ?
 ORDER BY component;
 
--- name: ListAllSnapshots :many
-SELECT id, application, name, tests_passed, created_at
-FROM snapshots
-ORDER BY id DESC LIMIT ? OFFSET ?;
+-- name: ListComponentCandidates :many
+SELECT sc.id, sc.component, sc.image_url,
+       s.id AS snapshot_id, s.application, s.created_at
+FROM snapshot_components sc
+JOIN snapshots s ON s.id = sc.snapshot_id
+WHERE s.application IN (sqlc.slice('applications'));
 
--- name: ListSnapshotsByApplication :many
-SELECT id, application, name, tests_passed, created_at
-FROM snapshots
-WHERE application = ?
-ORDER BY id DESC LIMIT ? OFFSET ?;
-
--- name: LatestSnapshotPerApplication :many
-SELECT s.id, s.application, s.name, s.tests_passed, s.created_at, CAST(counts.cnt AS INTEGER) AS cnt,
-       (SELECT COUNT(*) FROM test_suites WHERE snapshot_id = s.id) AS test_count
-FROM snapshots s
-JOIN (
-    SELECT application, MAX(id) AS max_id, COUNT(*) AS cnt
-    FROM snapshots
-    GROUP BY application
-) counts ON s.id = counts.max_id
-ORDER BY s.application;
-
--- name: GetSnapshotByID :one
-SELECT id, application, name, tests_passed, created_at
-FROM snapshots WHERE id = ?;
-
--- name: GetTestSuiteByID :one
-SELECT id, snapshot_id, name FROM test_suites WHERE id = ?;
-
--- name: CreateTestSuite :execlastid
-INSERT INTO test_suites (snapshot_id, name, status, pipeline_run, tool_name, tool_version, tests, passed, failed, skipped, pending, other, flaky, start_time, stop_time, duration_ms)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-
--- name: CreateTestCase :exec
-INSERT INTO test_cases (test_suite_id, name, status, duration_ms, message, trace, file_path, suite, retries, flaky)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-
--- name: ListTestSuitesBySnapshot :many
-SELECT id, snapshot_id, name, status, pipeline_run, tool_name, tool_version, tests, passed, failed, skipped, pending, other, flaky, start_time, stop_time, duration_ms, created_at
-FROM test_suites
-WHERE snapshot_id = ?
-ORDER BY name;
-
--- name: ListTestCasesBySuite :many
-SELECT id, test_suite_id, name, status, duration_ms, message, trace, file_path, suite, retries, flaky
-FROM test_cases
-WHERE test_suite_id = ?
-ORDER BY name;
-
--- name: CreateVulnerabilityReport :execlastid
-INSERT INTO vulnerability_reports (snapshot_id, component, arch, total, critical, high, medium, low, unknown, fixable)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-
--- name: CreateVulnerability :exec
-INSERT INTO vulnerabilities (report_id, name, severity, package_name, package_version, fixed_in_version, description, link)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-
--- name: ListVulnerabilityReportsBySnapshot :many
-SELECT id, snapshot_id, component, arch, total, critical, high, medium, low, unknown, fixable, created_at
-FROM vulnerability_reports
-WHERE snapshot_id = ?
-ORDER BY component, arch;
-
--- name: ListVulnerabilitiesByReport :many
-SELECT id, report_id, name, severity, package_name, package_version, fixed_in_version, description, link
-FROM vulnerabilities
-WHERE report_id = ?
-ORDER BY
-    CASE severity
-        WHEN 'Critical' THEN 0
-        WHEN 'High' THEN 1
-        WHEN 'Medium' THEN 2
-        WHEN 'Low' THEN 3
-        ELSE 4
-    END,
-    name;
+-- name: ListReleaseSnapshots :many
+-- Snapshots of the given applications, plus Snapshots a Release names that are
+-- no longer stored (missing = 1). quay-images-base is shared across versions,
+-- so its Snapshots count only with a component matching the LIKE pattern.
+WITH candidates AS (
+    SELECT s.name, s.application, s.created_at,
+           (SELECT COUNT(*) FROM snapshot_components sc WHERE sc.snapshot_id = s.id) AS component_count,
+           0 AS missing
+    FROM snapshots s
+    WHERE s.application IN (sqlc.slice('applications'))
+      AND (s.application != ?
+           OR EXISTS (SELECT 1 FROM snapshot_components sc
+                      WHERE sc.snapshot_id = s.id AND sc.component LIKE ?))
+      AND (? = 0 OR EXISTS (SELECT 1 FROM konflux_releases r
+                            WHERE r.snapshot = s.name AND r.application = s.application))
+    UNION ALL
+    SELECT r.snapshot, r.application, MIN(r.created_at), 0, 1
+    FROM konflux_releases r
+    WHERE r.application IN (sqlc.slice('missing_applications'))
+      AND r.snapshot != ''
+      AND NOT EXISTS (SELECT 1 FROM snapshots s WHERE s.name = r.snapshot)
+    GROUP BY r.application, r.snapshot
+)
+SELECT c.name, c.application, c.created_at, c.component_count, c.missing,
+       COALESCE(ss.kind, '') AS art_kind
+FROM candidates c
+LEFT JOIN staged_snapshots ss ON ss.name = c.name
+ORDER BY c.created_at DESC, c.name DESC
+LIMIT ? OFFSET ?;
