@@ -1,4 +1,4 @@
-r"""Side-by-side before/after PNG with numbered boxes marking what changed.
+r"""Side-by-side before/after PNG with numbered boxes marking what changed, or a contact sheet.
 
 usage: python3 dev/compare.py <spec.json> [<spec.json>...]
 
@@ -13,6 +13,14 @@ each half, and marks in pixels of the source PNG:
      "title_before": "b2 (before)", "title_after": "c1 (after)",
      "marks": [{"n": 1, "side": "before", "x": 40, "y": 120, "w": 300, "h": 80},
                {"n": 1, "side": "after", "x": 40, "y": 120, "w": 300, "h": 110}]}
+
+A contact sheet puts any number of shots side by side, each under its title and at its own
+pixel size; "marks" on an entry is optional and takes the same boxes without "side":
+
+    {"sheet": [{"img": "/tmp/shots/b2/green-light-1440.png", "title": "green"},
+               {"img": "/tmp/shots/b2/mixed-light-1440.png", "title": "mixed",
+                "marks": [{"n": 1, "x": 40, "y": 120, "w": 300, "h": 80}]}],
+     "out": "/tmp/shots/compare/sheet-light-1440.png"}
 """
 import base64
 import html
@@ -74,16 +82,27 @@ def half(path, title, marks):
 
 
 def load(spec_path):
-    """The spec at spec_path with each image's size, exiting on a missing file or a mark outside its image."""
+    """The spec at spec_path as (out, panels), each panel with its image's size, exiting on a
+    missing file or a mark outside its image."""
     with open(spec_path) as f:
         spec = json.load(f)
-    sizes = {side: png_size(spec[side]) for side in ("before", "after")}
-    for m in spec["marks"]:
-        w, h = sizes.get(m["side"], (0, 0))
-        if not (0 <= m["x"] and 0 <= m["y"] and 0 < m["w"] and 0 < m["h"]
-                and m["x"] + m["w"] <= w and m["y"] + m["h"] <= h):
-            sys.exit(f"compare.py: {spec_path}: mark {m} is outside the {m['side']} image ({w}x{h})")
-    return spec, sizes
+    if "sheet" in spec:
+        panels = spec["sheet"]
+        if not panels:
+            sys.exit(f"compare.py: {spec_path}: sheet is empty")
+    else:
+        for m in spec["marks"]:
+            if m["side"] not in ("before", "after"):
+                sys.exit(f"compare.py: {spec_path}: mark {m} has no before or after side")
+        panels = [{"img": spec[side], "title": spec[f"title_{side}"],
+                   "marks": [m for m in spec["marks"] if m["side"] == side]} for side in ("before", "after")]
+    for panel in panels:
+        w, h = panel["size"] = png_size(panel["img"])
+        for m in panel.get("marks", []):
+            if not (0 <= m["x"] and 0 <= m["y"] and 0 < m["w"] and 0 < m["h"]
+                    and m["x"] + m["w"] <= w and m["y"] + m["h"] <= h):
+                sys.exit(f"compare.py: {spec_path}: mark {m} is outside {panel['img']} ({w}x{h})")
+    return spec["out"], panels
 
 
 def main():
@@ -91,15 +110,15 @@ def main():
         sys.exit(__doc__)
     specs = [load(p) for p in sys.argv[1:]]
     with sync_playwright() as p, p.chromium.launch() as browser:
-        for spec, sizes in specs:
-            (bw, bh), (aw, ah) = sizes["before"], sizes["after"]
-            body = "".join(half(spec[side], spec[f"title_{side}"], [m for m in spec["marks"] if m["side"] == side])
-                           for side in ("before", "after"))
-            with browser.new_context(viewport={"width": bw + GAP + aw, "height": TITLE + max(bh, ah)}) as ctx:
+        for out, panels in specs:
+            width = sum(panel["size"][0] for panel in panels) + GAP * (len(panels) - 1)
+            height = TITLE + max(panel["size"][1] for panel in panels)
+            body = "".join(half(panel["img"], panel["title"], panel.get("marks", [])) for panel in panels)
+            with browser.new_context(viewport={"width": width, "height": height}) as ctx:
                 page = ctx.new_page()
                 page.set_content(f"<!doctype html><style>{STYLE}</style>{body}")
-                page.screenshot(path=spec["out"])
-            print(f"== {spec['out']} {bw + GAP + aw}x{TITLE + max(bh, ah)}")
+                page.screenshot(path=out)
+            print(f"== {out} {width}x{height}")
     return 0
 
 
