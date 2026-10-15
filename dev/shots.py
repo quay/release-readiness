@@ -1,6 +1,6 @@
 r"""Full-page screenshots and card text of release-readiness pages.
 
-usage: python3 dev/shots.py [--route GLOB=FILE]... [--width PX]... <base-url> <out-dir> <path>...
+usage: python3 dev/shots.py [--route GLOB=FILE]... [--width PX]... [--dark] <base-url> <out-dir> <path>...
 
 Prerequisite: pip install --user playwright && python3 -m playwright install chromium
 
@@ -41,10 +41,10 @@ def route(spec):
     return glob, lambda r: r.fulfill(status=200, content_type="application/json", body=body)
 
 
-def shoot(browser, url, png, routes, width):
+def shoot(browser, url, png, routes, width, dark):
     """Save url's whole page to png and print its console errors and cards; return why it did not load, or None."""
     with browser.new_context(viewport={"width": width, "height": 1000}, locale="en-US",
-                             timezone_id="America/New_York") as ctx:
+                             timezone_id="America/New_York", color_scheme="dark" if dark else "light") as ctx:
         for glob, handler in routes:
             ctx.route(glob, handler)
         page = ctx.new_page()
@@ -56,6 +56,8 @@ def shoot(browser, url, png, routes, width):
             return e.message.partition("\n")[0]
         if resp.status >= 400:
             return f"HTTP {resp.status}"
+        if dark and not page.evaluate("() => document.documentElement.classList.contains('pf-v6-theme-dark')"):
+            return "no pf-v6-theme-dark class on <html> under a dark color scheme"
         page.wait_for_timeout(1500)
         for _ in range(5):
             grow = page.evaluate(GROW)
@@ -80,6 +82,8 @@ def main():
     ap.add_argument("--width", action="append", type=int, metavar="PX",
                     help="viewport width, repeatable (default 1440); with more than one, "
                          "each file name ends in -PX")
+    ap.add_argument("--dark", action="store_true",
+                    help="emulate prefers-color-scheme: dark, which the app maps to PatternFly's dark theme")
     ap.add_argument("base", metavar="base-url")
     ap.add_argument("out", metavar="out-dir")
     ap.add_argument("paths", metavar="path", nargs="+")
@@ -92,7 +96,7 @@ def main():
             for width in widths:
                 suffix = f"-{width}" if len(widths) > 1 else ""
                 png = os.path.join(args.out, name + suffix + ".png")
-                err = shoot(browser, args.base.rstrip("/") + path, png, args.route, width)
+                err = shoot(browser, args.base.rstrip("/") + path, png, args.route, width, args.dark)
                 if err:
                     print(f"{path} at {width}px: {err}", file=sys.stderr)
                     failed = True
