@@ -12,7 +12,9 @@ import (
 )
 
 // fakeJira is one issue, PROJQUAY-1, whose writes are counted and applied.
+// calls counts every call, reads included.
 type fakeJira struct {
+	calls         int
 	issue         jira.WriteIssue
 	versions      map[string]jira.VersionField
 	comments      []jira.Comment
@@ -31,30 +33,36 @@ func newFakeJira(status string, targets ...string) *fakeJira {
 }
 
 func (f *fakeJira) GetIssue(context.Context, string) (jira.WriteIssue, error) {
+	f.calls++
 	i := f.issue
 	i.TargetVersions = slices.Clone(i.TargetVersions)
 	return i, nil
 }
 
 func (f *fakeJira) ListVersions(context.Context) (map[string]jira.VersionField, error) {
+	f.calls++
 	return f.versions, nil
 }
 
 func (f *fakeJira) TargetVersionEditable(context.Context, string) (bool, error) {
+	f.calls++
 	return true, nil
 }
 
 func (f *fakeJira) GetTransitions(context.Context, string) ([]jira.Transition, error) {
+	f.calls++
 	return f.transitions, nil
 }
 
 func (f *fakeJira) EditTargetVersions(_ context.Context, key, add, remove string) error {
+	f.calls++
 	f.writes = append(f.writes, "edit "+key+" +"+add+" -"+remove)
 	f.issue.TargetVersions = append(slices.DeleteFunc(f.issue.TargetVersions, func(n string) bool { return n == remove }), add)
 	return nil
 }
 
 func (f *fakeJira) Transition(_ context.Context, key, id string) error {
+	f.calls++
 	f.writes = append(f.writes, "transition "+key+" "+id)
 	if f.transitionErr != nil {
 		return f.transitionErr
@@ -64,10 +72,12 @@ func (f *fakeJira) Transition(_ context.Context, key, id string) error {
 }
 
 func (f *fakeJira) ListComments(context.Context, string) ([]jira.Comment, error) {
+	f.calls++
 	return f.comments, nil
 }
 
 func (f *fakeJira) AddComment(_ context.Context, key, body string) error {
+	f.calls++
 	f.writes = append(f.writes, "comment "+key)
 	f.comments = append(f.comments, jira.Comment{Body: body})
 	return f.commentErr
@@ -103,7 +113,7 @@ func newWriter(j *fakeJira) (*Writer, *fakeStore) {
 		DesiredTargetVersion: "quay-v3.18.2",
 		Status:               StatusProposed,
 	}
-	return NewWriter(j, store, "PROJQUAY", artBase, slog.New(slog.NewTextHandler(io.Discard, nil))), store
+	return NewWriter(j, store, artBase, slog.New(slog.NewTextHandler(io.Discard, nil))), store
 }
 
 func applyPending(t *testing.T, w *Writer) {
@@ -126,7 +136,7 @@ func TestWriterDisabled(t *testing.T) {
 	}
 
 	addRecords(fx.store, "sha256:f2", "sha256:quay-"+sha(2))
-	fx.sync.Writer = NewWriter(j, fx.store, "PROJQUAY", artBase, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	fx.sync.Writer = NewWriter(j, fx.store, artBase, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	fx.run(t)
 	if len(j.writes) != 3 {
 		t.Errorf("writer on: writes %v; want edit, transition and comment", j.writes)
@@ -262,6 +272,21 @@ func TestWriterLostReply(t *testing.T) {
 	}
 }
 
+// TestWriterOtherProjectKey is an action on a non-PROJQUAY key: it is skipped
+// before any Jira call.
+func TestWriterOtherProjectKey(t *testing.T) {
+	j := newFakeJira("Verified", "quay-v3.18.z")
+	w, store := newWriter(j)
+	a := store.actions[writeKey]
+	delete(store.actions, writeKey)
+	a.Key.IssueKey = "OCPBUGS-1"
+	store.actions[a.Key] = a
+	applyPending(t, w)
+	if a := store.actions[a.Key]; j.calls != 0 || a.Status != StatusSkipped || a.SkipReason != "issue OCPBUGS-1 is not in PROJQUAY" {
+		t.Errorf("calls %d, action %+v; want none and skipped", j.calls, a)
+	}
+}
+
 func TestWriterGuards(t *testing.T) {
 	for name, tc := range map[string]struct {
 		jira   func(*fakeJira)
@@ -269,9 +294,9 @@ func TestWriterGuards(t *testing.T) {
 		check  func(Action) bool
 	}{
 		"other project": {
-			jira: func(j *fakeJira) { j.issue.Project = "OTHER" },
+			jira: func(j *fakeJira) { j.issue.Project = "OCPBUGS" },
 			check: func(a Action) bool {
-				return a.Status == StatusSkipped && a.SkipReason == "project OTHER is not PROJQUAY"
+				return a.Status == StatusSkipped && a.SkipReason == "project OCPBUGS is not PROJQUAY"
 			},
 		},
 		"other stream": {

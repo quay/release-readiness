@@ -25,6 +25,9 @@ type JiraWriter interface {
 }
 
 const (
+	// writeProject is the only Jira project the writer edits, whatever
+	// project the read-side sync is configured for.
+	writeProject   = "PROJQUAY"
 	releasePending = "Release Pending"
 	// maxAttempts is how often an action is tried before it is left in error.
 	maxAttempts = 5
@@ -35,16 +38,15 @@ const (
 // to Release Pending and comments the ART builds of the FBC and of the quay
 // image in it.
 type Writer struct {
-	jira    JiraWriter
-	store   Store
-	project string
+	jira  JiraWriter
+	store Store
 	// artURL is the ART build history service the comment links to.
 	artURL string
 	logger *slog.Logger
 }
 
-func NewWriter(j JiraWriter, store Store, project, artURL string, log *slog.Logger) *Writer {
-	return &Writer{jira: j, store: store, project: project, artURL: artURL, logger: log}
+func NewWriter(j JiraWriter, store Store, artURL string, log *slog.Logger) *Writer {
+	return &Writer{jira: j, store: store, artURL: artURL, logger: log}
 }
 
 // ApplyPending applies every pending action. Only store errors fail it.
@@ -67,6 +69,11 @@ func (w *Writer) ApplyPending(ctx context.Context) error {
 // leaves a in error; only store errors are returned.
 func (w *Writer) apply(ctx context.Context, a Action) error {
 	a.Attempts++
+	if !strings.HasPrefix(a.Key.IssueKey, writeProject+"-") {
+		_ = skip(&a, "issue "+a.Key.IssueKey+" is not in "+writeProject)
+		w.logger.Info("jira write skipped", "issue", a.Key.IssueKey, "fbc", a.FBCNVR, "reason", a.SkipReason)
+		return w.save(ctx, a)
+	}
 	for _, step := range []func(context.Context, *Action) error{w.version, w.transition, w.comment} {
 		err := step(ctx, &a)
 		switch {
@@ -97,8 +104,8 @@ func (w *Writer) issue(ctx context.Context, a *Action) (jira.WriteIssue, bool, e
 	}
 	stream := placeholder(a.DesiredTargetVersion)
 	switch {
-	case issue.Project != w.project:
-		return issue, false, skip(a, fmt.Sprintf("project %s is not %s", issue.Project, w.project))
+	case issue.Project != writeProject:
+		return issue, false, skip(a, fmt.Sprintf("project %s is not %s", issue.Project, writeProject))
 	case !slices.Contains(issue.TargetVersions, stream) && !slices.Contains(issue.TargetVersions, a.DesiredTargetVersion):
 		return issue, false, skip(a, fmt.Sprintf("Target Version %v has neither %s nor %s", issue.TargetVersions, stream, a.DesiredTargetVersion))
 	}
