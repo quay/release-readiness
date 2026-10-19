@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -20,6 +21,9 @@ type CommitFetcher interface {
 	// Range returns the commits after base up to and including head, oldest
 	// first. It fails unless head descends from base and is on branch.
 	Range(ctx context.Context, repo, branch, base, head string) ([]Commit, error)
+	// Branch returns the one branch named with prefix whose head is commit,
+	// else the one that contains it, or why there is not exactly one.
+	Branch(ctx context.Context, repo, prefix, commit string) (branch, reason string, err error)
 }
 
 // GitHubFetcher reads commit ranges from the GitHub REST API and caches them
@@ -29,12 +33,14 @@ type GitHubFetcher struct {
 	http    *http.Client
 	token   string
 	cache   map[string][]Commit
+	// branches caches Branch results by repo, prefix and commit.
+	branches map[string][2]string
 }
 
 // NewGitHubFetcher returns a fetcher using hc. An empty token is
 // unauthenticated.
 func NewGitHubFetcher(hc *http.Client, token string) *GitHubFetcher {
-	return &GitHubFetcher{baseURL: "https://api.github.com", http: hc, token: token, cache: map[string][]Commit{}}
+	return &GitHubFetcher{baseURL: "https://api.github.com", http: hc, token: token, cache: map[string][]Commit{}, branches: map[string][2]string{}}
 }
 
 var fullSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
@@ -59,10 +65,9 @@ type comparison struct {
 
 // Range implements CommitFetcher for https://github.com/{owner}/{repo}.
 func (f *GitHubFetcher) Range(ctx context.Context, repo, branch, base, head string) ([]Commit, error) {
-	rest, ok := strings.CutPrefix(repo, "https://github.com/")
-	parts := strings.Split(rest, "/")
-	if !ok || len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return nil, fmt.Errorf("unsupported host or repository %q", repo)
+	api, err := f.api(repo)
+	if err != nil {
+		return nil, err
 	}
 	if !fullSHA.MatchString(base) || !fullSHA.MatchString(head) {
 		return nil, fmt.Errorf("base %q and head %q must be full commit SHAs", base, head)
@@ -77,7 +82,6 @@ func (f *GitHubFetcher) Range(ctx context.Context, repo, branch, base, head stri
 		return cached, nil
 	}
 
-	api := f.baseURL + "/repos/" + rest
 	what := fmt.Sprintf("compare %s %s...%s", repo, base, head)
 	var commits []Commit
 	total := 0
@@ -87,7 +91,6 @@ func (f *GitHubFetcher) Range(ctx context.Context, repo, branch, base, head stri
 			return nil, fmt.Errorf("%s: next page %q is off %s", what, next, f.baseURL)
 		}
 		var c comparison
-		var err error
 		if next, err = f.get(ctx, next, &c); err != nil {
 			return nil, fmt.Errorf("%s: %w", what, err)
 		}
@@ -119,6 +122,75 @@ func (f *GitHubFetcher) Range(ctx context.Context, repo, branch, base, head stri
 
 	f.cache[key] = commits
 	return commits, nil
+}
+
+// Branch implements CommitFetcher for https://github.com/{owner}/{repo}.
+func (f *GitHubFetcher) Branch(ctx context.Context, repo, prefix, commit string) (string, string, error) {
+	api, err := f.api(repo)
+	if err != nil {
+		return "", "", err
+	}
+	if !fullSHA.MatchString(commit) {
+		return "", "", fmt.Errorf("commit %q is not a full SHA", commit)
+	}
+	key := strings.Join([]string{repo, prefix, commit}, " ")
+	if b, ok := f.branches[key]; ok {
+		return b[0], b[1], nil
+	}
+
+	var heads []struct {
+		Name string `json:"name"`
+	}
+	if _, err := f.get(ctx, api+"/commits/"+commit+"/branches-where-head", &heads); err != nil {
+		return "", "", fmt.Errorf("branches of %s with head %s: %w", repo, commit, err)
+	}
+	var names []string
+	for _, h := range heads {
+		if strings.HasPrefix(h.Name, prefix) {
+			names = append(names, h.Name)
+		}
+	}
+	if len(names) == 0 {
+		// The branch moved on since the build: find the branches holding it.
+		var refs []struct {
+			Ref string `json:"ref"`
+		}
+		next, err := f.get(ctx, api+"/git/matching-refs/heads/"+prefix, &refs)
+		if err == nil && next != "" {
+			err = errors.New("more than one page")
+		}
+		if err != nil {
+			return "", "", fmt.Errorf("list %s branches %s*: %w", repo, prefix, err)
+		}
+		for _, r := range refs {
+			name := strings.TrimPrefix(r.Ref, "refs/heads/")
+			var c comparison
+			if _, err := f.get(ctx, api+"/compare/"+commit+"..."+url.PathEscape(name)+"?per_page=1", &c); err != nil {
+				return "", "", fmt.Errorf("compare %s %s...%s: %w", repo, commit, name, err)
+			}
+			if c.Status == "ahead" || c.Status == "identical" {
+				names = append(names, name)
+			}
+		}
+	}
+	var b [2]string
+	if len(names) == 1 {
+		b[0] = names[0]
+	} else {
+		b[1] = fmt.Sprintf("commit %s is on %d %s* branches %v, want one", commit, len(names), prefix, names)
+	}
+	f.branches[key] = b
+	return b[0], b[1], nil
+}
+
+// api returns the API URL of a https://github.com/{owner}/{repo} repository.
+func (f *GitHubFetcher) api(repo string) (string, error) {
+	rest, ok := strings.CutPrefix(repo, "https://github.com/")
+	parts := strings.Split(rest, "/")
+	if !ok || len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", fmt.Errorf("unsupported host or repository %q", repo)
+	}
+	return f.baseURL + "/repos/" + rest, nil
 }
 
 // get decodes u's JSON into v and returns its rel="next" link, "" for none.

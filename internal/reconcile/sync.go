@@ -69,9 +69,9 @@ func (s *Sync) Run(ctx context.Context, interval time.Duration) {
 type slot struct{ stream, operator, ocp string }
 
 // RunOnce reconciles every StageFBC not yet done, then writes the pending
-// actions to Jira when a Writer is set. Only store errors fail it;
-// anything that keeps an FBC's issues from being known for good is logged
-// as its uncertainty.
+// actions to Jira when a Writer is set. Only store errors fail it; anything
+// that keeps an FBC's issues from being known for good is logged as its
+// uncertainty.
 func (s *Sync) RunOnce(ctx context.Context) error {
 	fbcs, err := s.store.ListStageFBCs(ctx)
 	if err != nil {
@@ -88,12 +88,9 @@ func (s *Sync) RunOnce(ctx context.Context) error {
 	// gaps holds why each slotted FBC listed after one of those is uncertain.
 	gaps := map[[2]string]string{}
 	for _, f := range fbcs {
-		stream := f.Assembly
-		if i := strings.LastIndex(stream, "."); i >= 0 {
-			stream = stream[:i]
-		}
-		if !slices.Contains(streams, stream) {
-			s.logger.Debug("stream not configured", "release", f.Release, "assembly", f.Assembly)
+		stream, ok := streamOf(f.Assembly)
+		if !ok {
+			s.logger.Debug("assembly not X.Y.Z", "release", f.Release, "assembly", f.Assembly)
 			continue
 		}
 		if f.RenderState == "" {
@@ -321,7 +318,7 @@ func (s *Sync) actions(ctx context.Context, stream string, f StageFBC, prev stri
 			uncertain = append(uncertain, fmt.Sprintf("component %s: no ART source", digest))
 		}
 		for _, src := range srcs {
-			repo, branch, reason := allowlisted(src, stream)
+			c, reason := allowlisted(src)
 			if reason == "" {
 				p, ok := before[src.Name]
 				switch {
@@ -329,10 +326,23 @@ func (s *Sync) actions(ctx context.Context, stream string, f StageFBC, prev stri
 					reason = "new component"
 				case ambiguous[src.Name]:
 					reason = "more than one commit in the previous FBC"
-				case p.SourceRepo != repo:
-					reason = fmt.Sprintf("previous source repo %s is not %s", p.SourceRepo, repo)
+				case p.SourceRepo != c.repo:
+					reason = fmt.Sprintf("previous source repo %s is not %s", p.SourceRepo, c.repo)
 				default:
-					k := span{repo, p.Commitish, src.Commitish}
+					var branch string
+					if branch, reason, err = s.branch(ctx, c, stream, p.Commitish, src.Commitish); err != nil {
+						if ctx.Err() != nil {
+							return nil, "", ctx.Err()
+						}
+						if errors.Is(err, errTransient) {
+							return nil, "GitHub: " + err.Error(), nil
+						}
+						reason = err.Error()
+					}
+					if reason != "" {
+						break
+					}
+					k := span{c.repo, p.Commitish, src.Commitish}
 					if spans[k] == nil {
 						spans[k] = &spanOf{branch: branch}
 					}
@@ -455,26 +465,39 @@ func (s *Sync) memberSources(ctx context.Context, fbcDigest string) (map[string]
 	return sources, nil
 }
 
-// allowlisted returns the repository and branch of src's allowlisted
-// component, or why its commits cannot be trusted.
-func allowlisted(src Source, stream string) (repo, branch, reason string) {
+// allowlisted returns src's allowlisted component, or why its commits
+// cannot be trusted.
+func allowlisted(src Source) (component, string) {
 	c, ok := allowlist[src.Name]
 	switch {
 	case !ok:
-		return "", "", "not in the allowlist"
+		return c, "not in the allowlist"
 	case src.SourceRepo != c.repo:
-		return "", "", fmt.Sprintf("source repo %s is not %s", src.SourceRepo, c.repo)
+		return c, fmt.Sprintf("source repo %s is not %s", src.SourceRepo, c.repo)
 	case !fullSHA.MatchString(src.Commitish):
-		return "", "", fmt.Sprintf("commit %q is not a full SHA", src.Commitish)
+		return c, fmt.Sprintf("commit %q is not a full SHA", src.Commitish)
 	}
-	b := "redhat-" + stream
-	if c.branches != nil {
-		b = c.branches[stream]
+	return c, ""
+}
+
+// branch returns the branch of c that both prev and cur are on, or why it
+// is not known.
+func (s *Sync) branch(ctx context.Context, c component, stream, prev, cur string) (string, string, error) {
+	if c.branchPrefix == "" {
+		return "redhat-" + stream, "", nil
 	}
-	if b == "" || !slices.Contains(streams, stream) {
-		return "", "", "no branch for stream " + stream
+	var branches [2]string
+	for i, commit := range []string{prev, cur} {
+		b, reason, err := s.commits.Branch(ctx, c.repo, c.branchPrefix, commit)
+		if err != nil || reason != "" {
+			return "", reason, err
+		}
+		branches[i] = b
 	}
-	return c.repo, b, ""
+	if branches[0] != branches[1] {
+		return "", fmt.Sprintf("previous commit %s is on %s, current %s on %s", prev, branches[0], cur, branches[1]), nil
+	}
+	return branches[1], "", nil
 }
 
 // uncertain logs why some of f's issues may not be known.

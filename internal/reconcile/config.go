@@ -2,21 +2,33 @@
 // fix.
 package reconcile
 
-// streams are the Quay streams whose FBCs are reconciled.
-var streams = []string{"3.16", "3.17", "3.18", "5.0"}
+import "regexp"
 
-// component is an allowlisted ART build's public repository, and the branch
-// of each stream its commits land on; nil branches is redhat-{stream}.
+// assemblyStream matches an X.Y.Z assembly; its group is the X.Y stream.
+var assemblyStream = regexp.MustCompile(`^([0-9]+\.[0-9]+)\.[0-9]+$`)
+
+// streamOf returns the stream of an X.Y.Z assembly. Every stream ART stages
+// an FBC for is reconciled.
+func streamOf(assembly string) (string, bool) {
+	m := assemblyStream.FindStringSubmatch(assembly)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// component is an allowlisted ART build's public repository. Its commits
+// land on redhat-{stream}, or, with a branchPrefix, on the one branch of
+// that prefix holding the commit.
 type component struct {
-	repo     string
-	branches map[string]string
+	repo, branchPrefix string
 }
 
 // allowlist holds the ART builds, by ART name, whose source commits are
 // reconciled. Anything it does not list is uncertain.
 var allowlist = map[string]component{
 	"quay-quay":                               {repo: "https://github.com/quay/quay"},
-	"quay-clair":                              {repo: "https://github.com/quay/clair", branches: map[string]string{"3.16": "release-4.8", "3.17": "release-4.9", "3.18": "release-4.9", "5.0": "release-4.9"}},
+	"quay-clair":                              {repo: "https://github.com/quay/clair", branchPrefix: "release-"},
 	"quay-builder":                            {repo: "https://github.com/quay/quay-builder"},
 	"quay-builder-qemu":                       {repo: "https://github.com/quay/quay-builder-qemu"},
 	"quay-operator":                           {repo: "https://github.com/quay/quay-operator"},

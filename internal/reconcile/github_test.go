@@ -218,3 +218,79 @@ func TestRangeNoRequest(t *testing.T) {
 		}
 	}
 }
+
+func TestBranch(t *testing.T) {
+	const clair = "https://github.com/quay/clair"
+	commit := sha(7)
+	for _, tc := range []struct {
+		name   string
+		heads  []string
+		status map[string]string
+		branch string
+		reason string
+	}{
+		{"exact head", []string{"master", "release-4.9"}, nil, "release-4.9", ""},
+		{"two heads", []string{"release-4.8", "release-4.8-lts"}, nil, "", "on 2 release-* branches [release-4.8 release-4.8-lts]"},
+		{"moved head", nil, map[string]string{"release-4.8": "diverged", "release-4.9": "ahead"}, "release-4.9", ""},
+		{"two containing", nil, map[string]string{"release-4.8": "ahead", "release-4.9": "ahead"}, "", "on 2 release-* branches"},
+		{"none containing", nil, map[string]string{"release-4.8": "behind", "release-4.9": "diverged"}, "", "on 0 release-* branches"},
+	} {
+		requests := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests++
+			api := "/repos/quay/clair/"
+			switch {
+			case r.URL.Path == api+"commits/"+commit+"/branches-where-head":
+				heads := []map[string]any{}
+				for _, h := range tc.heads {
+					heads = append(heads, map[string]any{"name": h})
+				}
+				_ = json.NewEncoder(w).Encode(heads)
+			case r.URL.Path == api+"git/matching-refs/heads/release-":
+				_ = json.NewEncoder(w).Encode([]map[string]any{{"ref": "refs/heads/release-4.8"}, {"ref": "refs/heads/release-4.9"}})
+			case strings.HasPrefix(r.URL.Path, api+"compare/"+commit+"..."):
+				_ = json.NewEncoder(w).Encode(map[string]any{"status": tc.status[strings.TrimPrefix(r.URL.Path, api+"compare/"+commit+"...")]})
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		f := NewGitHubFetcher(srv.Client(), "")
+		f.baseURL = srv.URL
+		for range 2 {
+			branch, reason, err := f.Branch(context.Background(), clair, "release-", commit)
+			if err != nil || branch != tc.branch || !strings.Contains(reason, tc.reason) || (reason == "") != (tc.reason == "") {
+				t.Errorf("%s: Branch = %q, %q, %v; want %q, %q", tc.name, branch, reason, err, tc.branch, tc.reason)
+			}
+		}
+		if want := map[bool]int{true: 1, false: 4}[tc.status == nil]; requests != want {
+			t.Errorf("%s: %d requests, want %d from the first Branch only", tc.name, requests, want)
+		}
+		srv.Close()
+	}
+}
+
+func TestBranchError(t *testing.T) {
+	for _, tc := range []struct {
+		status    int
+		transient bool
+	}{
+		{http.StatusServiceUnavailable, true},
+		{http.StatusTooManyRequests, true},
+		{http.StatusNotFound, false},
+	} {
+		g := newFake(t)
+		g.fail = func(w http.ResponseWriter) { w.WriteHeader(tc.status) }
+		f := g.start(t, "")
+		_, _, err := f.Branch(context.Background(), "https://github.com/quay/clair", "release-", sha(7))
+		if err == nil || errors.Is(err, errTransient) != tc.transient {
+			t.Errorf("GitHub %d: error %v, want transient %v", tc.status, err, tc.transient)
+		}
+		// An error is not cached: the next pass asks again.
+		g.fail = nil
+		before := g.requests
+		_, _, _ = f.Branch(context.Background(), "https://github.com/quay/clair", "release-", sha(7))
+		if g.requests == before {
+			t.Errorf("GitHub %d: error was cached", tc.status)
+		}
+	}
+}

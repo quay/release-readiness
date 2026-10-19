@@ -118,7 +118,10 @@ func (f *fakeStore) MarkRun(_ context.Context, release, digest string) error {
 type fakeCommits struct {
 	ranges map[string][]Commit
 	errs   map[string]error
-	calls  []string
+	// branches holds each resolved Branch by repo, prefix and commit; any
+	// other is unresolved.
+	branches map[string]string
+	calls    []string
 }
 
 func (f *fakeCommits) Range(_ context.Context, repo, branch, base, head string) ([]Commit, error) {
@@ -289,7 +292,7 @@ func TestRunOnceUncertain(t *testing.T) {
 
 func TestRunOnceUnslotted(t *testing.T) {
 	fx := newFixture(t)
-	fx.stage("r1", "3.15.1", "sha256:old", sha(1), sha(100))
+	fx.stage("r1", "3.15", "sha256:old", sha(1), sha(100))
 	f := fx.stage("r2", "3.18.1", "sha256:noocp", sha(2), sha(100))
 	f.FBCNVR = "quay-operator-fbc-3.18.1-1"
 	fx.store.fbcs[1] = f
@@ -305,7 +308,7 @@ func TestRunOnceUnslotted(t *testing.T) {
 		t.Error("unslotted FBC not marked run")
 	}
 	if _, ok := fx.store.runs[[2]string{"r1", "sha256:old"}]; ok {
-		t.Error("3.15 FBC marked run")
+		t.Error("FBC of a non-X.Y.Z assembly marked run")
 	}
 }
 
@@ -620,5 +623,109 @@ func TestRunOnceGitHubError(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func (f *fakeCommits) Branch(_ context.Context, repo, prefix, commit string) (string, string, error) {
+	k := strings.Join([]string{repo, prefix, commit}, " ")
+	f.calls = append(f.calls, k)
+	if err := f.errs[k]; err != nil {
+		return "", "", err
+	}
+	if b, ok := f.branches[k]; ok {
+		return b, "", nil
+	}
+	return "", "on no branch", nil
+}
+
+// A stream no list names baselines on first sight, then reconciles.
+func TestRunOnceNewStream(t *testing.T) {
+	fx := newFixture(t)
+	op := sha(100)
+	fx.stage("r1", "3.10.27", "sha256:f1", sha(1), op)
+	fx.stage("r2", "3.10.27", "sha256:f2", sha(2), op)
+	fx.run(t)
+	if _, ok := fx.store.baselines[slot{"3.10", "quay-operator-fbc", "4.16"}]; !ok || len(fx.store.actions) != 0 || len(fx.commits.calls) != 0 {
+		t.Fatalf("first pass: baselines %+v, actions %+v, fetches %v; want a 3.10 baseline only", fx.store.baselines, fx.store.actions, fx.commits.calls)
+	}
+
+	fx.stage("r3", "3.10.28", "sha256:f3", sha(3), op)
+	fx.commits.ranges[quayRepo+" redhat-3.10 "+sha(2)+" "+sha(3)] = []Commit{{SHA: sha(3), Message: "PROJQUAY-1 fix"}}
+	fx.run(t)
+	if a := fx.store.actions[ActionKey{FBCDigest: "sha256:f3", IssueKey: "PROJQUAY-1", Release: "r3"}]; a.Status != StatusProposed || a.DesiredTargetVersion != "quay-v3.10.28" {
+		t.Errorf("PROJQUAY-1 = %+v; want proposed for quay-v3.10.28", a)
+	}
+}
+
+// stageClair stages an FBC whose quay image is unchanged and whose Clair
+// image is built from clairCommit.
+func (fx *fixture) stageClair(release, digest, clairCommit string) {
+	fx.stage(release, "3.18.1", digest, sha(1), sha(100))
+	img := "sha256:clair-" + clairCommit
+	fx.store.sources[img] = []Source{{Name: "quay-clair", SourceRepo: clairRepo, Commitish: clairCommit}}
+	fx.store.members[digest] = append(fx.store.members[digest], img)
+}
+
+const clairRepo = "https://github.com/quay/clair"
+
+func TestRunOnceClairBranch(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		prev, cur string
+		reason    string
+	}{
+		{"same branch", "release-4.9", "release-4.9", ""},
+		{"diverged", "release-4.8", "release-4.8-lts", "previous commit " + sha(5) + " is on release-4.8, current " + sha(6) + " on release-4.8-lts"},
+		{"unresolved", "release-4.9", "", "component quay-clair: on no branch"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newFixture(t)
+			fx.commits.branches = map[string]string{clairRepo + " release- " + sha(5): tc.prev}
+			if tc.cur != "" {
+				fx.commits.branches[clairRepo+" release- "+sha(6)] = tc.cur
+			}
+			fx.stageClair("r1", "sha256:f1", sha(5))
+			fx.run(t)
+			fx.stageClair("r2", "sha256:f2", sha(6))
+			fx.commits.ranges[clairRepo+" release-4.9 "+sha(5)+" "+sha(6)] = []Commit{{SHA: sha(6), Message: "PROJQUAY-9 fix"}}
+			fx.run(t)
+
+			_, proposed := fx.store.actions[ActionKey{FBCDigest: "sha256:f2", IssueKey: "PROJQUAY-9", Release: "r2"}]
+			if proposed != (tc.reason == "") || !strings.Contains(fx.uncertain("r2"), tc.reason) {
+				t.Errorf("proposed %v, uncertain %q; want reason %q", proposed, fx.uncertain("r2"), tc.reason)
+			}
+			if !fx.store.runs[[2]string{"r2", "sha256:f2"}] {
+				t.Error("r2 not marked run")
+			}
+		})
+	}
+}
+
+// A transient GitHub error resolving a branch makes the FBC wait for the
+// next pass; any other makes it uncertain.
+func TestRunOnceClairBranchError(t *testing.T) {
+	fx := newFixture(t)
+	fx.commits.branches = map[string]string{clairRepo + " release- " + sha(5): "release-4.9", clairRepo + " release- " + sha(6): "release-4.9", clairRepo + " release- " + sha(7): "release-4.9"}
+	fx.stageClair("r1", "sha256:f1", sha(5))
+	fx.run(t)
+	fx.stageClair("r2", "sha256:f2", sha(6))
+	k := clairRepo + " release- " + sha(6)
+	fx.commits.errs[k] = fmt.Errorf("%w: 503", errTransient)
+	fx.run(t)
+	if fx.store.runs[[2]string{"r2", "sha256:f2"}] || fx.uncertain("r2") != "" {
+		t.Fatalf("r2 marked run or uncertain after a transient GitHub error")
+	}
+	delete(fx.commits.errs, k)
+	fx.commits.ranges[clairRepo+" release-4.9 "+sha(5)+" "+sha(6)] = []Commit{{SHA: sha(6), Message: "PROJQUAY-9 fix"}}
+	fx.run(t)
+	if a := fx.store.actions[ActionKey{FBCDigest: "sha256:f2", IssueKey: "PROJQUAY-9", Release: "r2"}]; a.Status != StatusProposed {
+		t.Errorf("retry: PROJQUAY-9 = %+v; want proposed", a)
+	}
+
+	fx.stageClair("r3", "sha256:f3", sha(7))
+	fx.commits.errs[clairRepo+" release- "+sha(7)] = errors.New("GitHub 404 Not Found")
+	fx.run(t)
+	if !fx.store.runs[[2]string{"r3", "sha256:f3"}] || !strings.Contains(fx.uncertain("r3"), "component quay-clair: GitHub 404 Not Found") {
+		t.Errorf("r3 run %v, uncertain %q; want run and uncertain", fx.store.runs[[2]string{"r3", "sha256:f3"}], fx.uncertain("r3"))
 	}
 }
