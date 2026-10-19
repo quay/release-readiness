@@ -173,6 +173,64 @@ func (q *Queries) ListArtRecordsByDigest(ctx context.Context, digests []string) 
 	return items, nil
 }
 
+const listFBCBuilds = `-- name: ListFBCBuilds :many
+WITH staged AS (
+    SELECT substr(sc.image_url, instr(sc.image_url, '@') + 1) AS digest
+    FROM staged_snapshots ss
+    JOIN snapshots s ON s.name = ss.name
+    JOIN snapshot_components sc ON sc.snapshot_id = s.id
+    WHERE ss.kind = 'fbc' AND instr(sc.image_url, '@sha256:') > 0
+)
+SELECT h.group_name, h.nvr, h.digest, h.start_time,
+       CAST(COALESCE(r.state, '') AS TEXT) AS render_state,
+       CAST(h.digest IN (SELECT digest FROM staged) AS BOOLEAN) AS staged
+FROM art_history_records h
+LEFT JOIN fbc_renders r ON r.digest = h.digest
+WHERE h.build_type = 'fbc' AND substr(h.digest, 1, 7) = 'sha256:'
+ORDER BY h.start_time, h.nvr
+`
+
+type ListFBCBuildsRow struct {
+	GroupName   string
+	Nvr         string
+	Digest      string
+	StartTime   string
+	RenderState string
+	Staged      bool
+}
+
+// Each successful ART FBC build, oldest first, with the state of its render,
+// empty before the first, and whether an FBC Snapshot ART staged holds it.
+func (q *Queries) ListFBCBuilds(ctx context.Context) ([]ListFBCBuildsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listFBCBuilds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFBCBuildsRow
+	for rows.Next() {
+		var i ListFBCBuildsRow
+		if err := rows.Scan(
+			&i.GroupName,
+			&i.Nvr,
+			&i.Digest,
+			&i.StartTime,
+			&i.RenderState,
+			&i.Staged,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFBCMemberDigests = `-- name: ListFBCMemberDigests :many
 SELECT CAST(substr(image, instr(image, '@') + 1) AS TEXT) AS digest
 FROM fbc_related_images
@@ -278,66 +336,6 @@ func (q *Queries) ListSourcesByDigest(ctx context.Context, digest string) ([]Lis
 	for rows.Next() {
 		var i ListSourcesByDigestRow
 		if err := rows.Scan(&i.Name, &i.SourceRepo, &i.Commitish); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listStageFBCs = `-- name: ListStageFBCs :many
-SELECT kr.name AS release_name, ss.assembly, kr.completion_time,
-       CAST(substr(sc.image_url, instr(sc.image_url, '@') + 1) AS TEXT) AS fbc_digest,
-       CAST(COALESCE(r.state, '') AS TEXT) AS render_state,
-       CAST(COALESCE((SELECT h.nvr FROM art_history_records h
-                      WHERE h.build_type = 'fbc' AND h.digest = substr(sc.image_url, instr(sc.image_url, '@') + 1)
-                      ORDER BY h.start_time DESC, h.nvr DESC LIMIT 1), r.label_nvr, '') AS TEXT) AS fbc_nvr
-FROM staged_snapshots ss
-JOIN snapshots s ON s.name = ss.name
-JOIN snapshot_components sc ON sc.snapshot_id = s.id
-JOIN konflux_releases kr ON kr.snapshot = s.name AND kr.application = s.application
-LEFT JOIN fbc_renders r ON r.digest = substr(sc.image_url, instr(sc.image_url, '@') + 1)
-WHERE ss.kind = 'fbc' AND ss.env = 'stage' AND instr(sc.image_url, '@sha256:') > 0
-  AND kr.released_status = 'True' AND kr.released_reason = 'Succeeded' AND kr.completion_time != ''
-ORDER BY kr.completion_time, kr.name, fbc_digest
-`
-
-type ListStageFBCsRow struct {
-	ReleaseName    string
-	Assembly       string
-	CompletionTime string
-	FbcDigest      string
-	RenderState    string
-	FbcNvr         string
-}
-
-// Each catalog of an FBC Snapshot ART staged for stage whose Release
-// succeeded, across all assemblies, oldest completion first, with the state
-// of its render, empty before the first, and the NVR of its ART FBC build, else
-// its rendered label.
-func (q *Queries) ListStageFBCs(ctx context.Context) ([]ListStageFBCsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listStageFBCs)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListStageFBCsRow
-	for rows.Next() {
-		var i ListStageFBCsRow
-		if err := rows.Scan(
-			&i.ReleaseName,
-			&i.Assembly,
-			&i.CompletionTime,
-			&i.FbcDigest,
-			&i.RenderState,
-			&i.FbcNvr,
-		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

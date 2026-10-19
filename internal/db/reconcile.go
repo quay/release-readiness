@@ -122,16 +122,16 @@ func toAction(r dbsqlc.ReconcileAction) reconcile.Action {
 	}
 }
 
-func (d *DB) ListStageFBCs(ctx context.Context) ([]reconcile.StageFBC, error) {
-	rows, err := d.queries().ListStageFBCs(ctx)
+func (d *DB) ListFBCBuilds(ctx context.Context) ([]reconcile.FBCBuild, error) {
+	rows, err := d.queries().ListFBCBuilds(ctx)
 	if err != nil {
 		return nil, err
 	}
-	fbcs := make([]reconcile.StageFBC, len(rows))
+	builds := make([]reconcile.FBCBuild, len(rows))
 	for i, r := range rows {
-		fbcs[i] = reconcile.StageFBC{Release: r.ReleaseName, Assembly: r.Assembly, CompletionTime: r.CompletionTime, FBCDigest: r.FbcDigest, FBCNVR: r.FbcNvr, RenderState: r.RenderState}
+		builds[i] = reconcile.FBCBuild{Group: r.GroupName, NVR: r.Nvr, Digest: r.Digest, StartTime: r.StartTime, RenderState: r.RenderState, Staged: r.Staged}
 	}
-	return fbcs, nil
+	return builds, nil
 }
 
 func (d *DB) FBCMemberDigests(ctx context.Context, fbcDigest string) ([]string, error) {
@@ -145,10 +145,10 @@ func (d *DB) FBCMemberDigests(ctx context.Context, fbcDigest string) ([]string, 
 	return digests, nil
 }
 
-func (d *DB) RunDone(ctx context.Context, release, fbcDigest string) (bool, error) {
-	return d.queries().ReconcileRunDone(ctx, dbsqlc.ReconcileRunDoneParams{ReleaseName: release, FbcDigest: fbcDigest})
+func (d *DB) RunDone(ctx context.Context, nvr, fbcDigest string) (bool, error) {
+	return d.queries().ReconcileRunDone(ctx, dbsqlc.ReconcileRunDoneParams{ReleaseName: nvr, FbcDigest: fbcDigest})
 }
 
-func (d *DB) MarkRun(ctx context.Context, release, fbcDigest string) error {
-	return d.queries().InsertReconcileRun(ctx, dbsqlc.InsertReconcileRunParams{ReleaseName: release, FbcDigest: fbcDigest})
+func (d *DB) MarkRun(ctx context.Context, nvr, fbcDigest string) error {
+	return d.queries().InsertReconcileRun(ctx, dbsqlc.InsertReconcileRunParams{ReleaseName: nvr, FbcDigest: fbcDigest})
 }

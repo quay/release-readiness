@@ -13,10 +13,11 @@ const (
 	StatusError    = "error"
 )
 
-// ActionKey identifies an action: an issue an FBC's Release fixes.
+// ActionKey identifies an action: an issue an FBC build fixes.
 type ActionKey struct {
 	FBCDigest, IssueKey string
-	// Release is the Konflux Release name.
+	// Release is the FBC build's NVR. Rows from before builds were the input
+	// hold the name of the Konflux Release that staged it.
 	Release string
 }
 
@@ -32,11 +33,14 @@ type Action struct {
 	UpdatedAt                                time.Time
 }
 
-// StageFBC is one successful STAGE Release of an FBC Snapshot's catalog.
-type StageFBC struct {
-	Release, Assembly, CompletionTime, FBCDigest, FBCNVR string
-	// RenderState is the catalog's render state, "" before its first render.
+// FBCBuild is one successful ART FBC build.
+type FBCBuild struct {
+	// StartTime is when ART started the build, in UTC with no zone.
+	Group, NVR, Digest, StartTime string
+	// RenderState is the image's render state, "" before its first render.
 	RenderState string
+	// Staged is whether an FBC Snapshot ART staged holds the image.
+	Staged bool
 }
 
 // Source is an ART build, by its ART name, with the public repository and
@@ -57,8 +61,8 @@ type Baseline struct {
 
 // Store is the database layer the reconciler and writer need.
 type Store interface {
-	// ListStageFBCs returns every StageFBC, oldest completion first.
-	ListStageFBCs(ctx context.Context) ([]StageFBC, error)
+	// ListFBCBuilds returns every FBCBuild, oldest first.
+	ListFBCBuilds(ctx context.Context) ([]FBCBuild, error)
 	// FBCMemberDigests returns the digests of the FBC's head bundle, its
 	// related images and the FBC itself.
 	FBCMemberDigests(ctx context.Context, fbcDigest string) ([]string, error)
@@ -75,9 +79,9 @@ type Store interface {
 	GetBaseline(ctx context.Context, stream, operator, ocp string) (string, bool, error)
 	// InsertBaseline stores b unless its slot has a baseline already.
 	InsertBaseline(context.Context, Baseline) error
-	// RunDone reports whether the FBC of release was reconciled.
-	RunDone(ctx context.Context, release, fbcDigest string) (bool, error)
-	MarkRun(ctx context.Context, release, fbcDigest string) error
+	// RunDone reports whether the FBC build nvr was reconciled.
+	RunDone(ctx context.Context, nvr, fbcDigest string) (bool, error)
+	MarkRun(ctx context.Context, nvr, fbcDigest string) error
 	// UpsertAction stores a. Without attempts, a leaves an existing
 	// proposed or attempted row as it is; with them, a replaces only a
 	// proposed or error row, from no later attempt.

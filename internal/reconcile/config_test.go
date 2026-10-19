@@ -2,23 +2,6 @@ package reconcile
 
 import "testing"
 
-func TestStreamOf(t *testing.T) {
-	for _, tc := range []struct {
-		assembly, stream string
-		ok               bool
-	}{
-		{"3.10.28", "3.10", true},
-		{"5.0.0", "5.0", true},
-		{"3.18", "", false},
-		{"3.18.1-rc", "", false},
-		{"x.y.z", "", false},
-	} {
-		if stream, ok := streamOf(tc.assembly); stream != tc.stream || ok != tc.ok {
-			t.Errorf("streamOf(%q) = %q, %v; want %q, %v", tc.assembly, stream, ok, tc.stream, tc.ok)
-		}
-	}
-}
-
 func TestAllowlisted(t *testing.T) {
 	for _, tc := range []struct {
 		component, repo, commit, prefix, reason string

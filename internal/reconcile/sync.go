@@ -13,28 +13,31 @@ import (
 	"strings"
 	"time"
 
+	"github.com/quay/release-readiness/internal/artbuild"
 	"github.com/quay/release-readiness/internal/syncstatus"
 )
 
-// provenanceWait bounds how long after its Release completed an FBC waits
-// for ART records of its digests that are not stored yet: the history sync
+// provenanceWait bounds how long after its build started an FBC waits for
+// ART records of its digests that are not stored yet: the history sync
 // lists them, and the FBC render stores its bundle's after the render.
 const provenanceWait = 6 * time.Hour
 
 var (
 	issueKey = regexp.MustCompile(`\bPROJQUAY-[0-9]+\b`)
-	ocpToken = regexp.MustCompile(`\bocp([0-9]+\.[0-9]+)\b`)
+	// groupStream matches an ART group; its match is the X.Y stream.
+	groupStream = regexp.MustCompile(`^quay-([0-9]+\.[0-9]+)$`)
 )
 
-// Sync proposes, for each successful STAGE FBC after its slot's baseline,
-// the Jira issues fixed by the commits between it and the previous one.
+// Sync proposes, for each successful ART FBC build after its slot's
+// baseline, the Jira issues fixed by the commits between it and the
+// previous one.
 type Sync struct {
 	store   Store
 	commits CommitFetcher
 	logger  *slog.Logger
 	now     func() time.Time
-	// waiting holds the reason each waiting FBC last logged.
-	waiting map[[2]string]string
+	// waiting holds the reason each waiting FBC, by NVR, last logged.
+	waiting map[string]string
 	// Tx runs fn in a transaction; nil runs it on the store directly.
 	Tx func(ctx context.Context, fn func(Store) error) error
 	// Status receives each pass's outcome; nil reports nowhere.
@@ -44,7 +47,7 @@ type Sync struct {
 }
 
 func NewSync(store Store, commits CommitFetcher, log *slog.Logger) *Sync {
-	return &Sync{store: store, commits: commits, logger: log, now: time.Now, waiting: map[[2]string]string{}}
+	return &Sync{store: store, commits: commits, logger: log, now: time.Now, waiting: map[string]string{}}
 }
 
 // Run reconciles immediately and then every interval until ctx is cancelled.
@@ -68,78 +71,102 @@ func (s *Sync) Run(ctx context.Context, interval time.Duration) {
 
 type slot struct{ stream, operator, ocp string }
 
-// RunOnce reconciles every StageFBC not yet done, then writes the pending
+// build is an FBCBuild with its stream, from its group, and the operator,
+// X.Y.Z version and OCP version of its NVR.
+type build struct {
+	FBCBuild
+	stream, operator, version, ocp string
+}
+
+// RunOnce reconciles every FBCBuild not yet done, then writes the pending
 // actions to Jira when a Writer is set. Only store errors fail it; anything
 // that keeps an FBC's issues from being known for good is logged as its
 // uncertainty.
 func (s *Sync) RunOnce(ctx context.Context) error {
-	fbcs, err := s.store.ListStageFBCs(ctx)
+	listed, err := s.store.ListFBCBuilds(ctx)
 	if err != nil {
 		return err
 	}
-	slots := map[slot][]StageFBC{}
+	var fbcs []build
+	// newest holds the newest NVR of each operator, version and OCP version.
+	newest := map[[3]string]string{}
+	for _, f := range listed {
+		m := groupStream.FindStringSubmatch(f.Group)
+		if m == nil {
+			s.logger.Debug("group not quay-X.Y", "fbc", f.NVR, "group", f.Group)
+			continue
+		}
+		operator, version, ocp, ok := artbuild.ParseFBC(f.NVR)
+		if !ok {
+			s.logger.Debug("NVR has no X.Y.Z version", "fbc", f.NVR)
+			continue
+		}
+		fbcs = append(fbcs, build{FBCBuild: f, stream: m[1], operator: operator, version: version, ocp: ocp})
+		// The NVRs of one operator, version and OCP differ only in their build timestamp.
+		k := [3]string{operator, version, ocp}
+		newest[k] = max(newest[k], f.NVR)
+	}
+	slots := map[slot][]build{}
 	var order []slot
 	held := map[string]bool{}
-	// noSlot lists each stream's FBCs with no slot. Any slot's next FBC may
-	// follow one, so a diff against its slot predecessor would take its fixes.
-	noSlot := map[string][]StageFBC{}
+	// noSlot lists each stream's FBCs with no slot. The next FBC of the same
+	// operator and OCP may follow one, so a diff against its slot
+	// predecessor would take its fixes.
+	noSlot := map[string][]build{}
 	// seen counts the stream's noSlot FBCs listed before each slot's last FBC.
 	seen := map[slot]int{}
 	// gaps holds why each slotted FBC listed after one of those is uncertain.
-	gaps := map[[2]string]string{}
+	gaps := map[string]string{}
 	for _, f := range fbcs {
-		stream, ok := streamOf(f.Assembly)
-		if !ok {
-			s.logger.Debug("assembly not X.Y.Z", "release", f.Release, "assembly", f.Assembly)
-			continue
-		}
 		if f.RenderState == "" {
+			if !f.Staged && f.NVR != newest[[3]string{f.operator, f.version, f.ocp}] {
+				// Only staged and newest builds are rendered. The next build of
+				// f's slot, of the same version, takes its diff.
+				s.logger.Debug("superseded before its render", "fbc", f.NVR)
+				continue
+			}
 			// f's slot and members are not known yet, so its whole stream waits with it.
-			held[stream] = true
+			held[f.stream] = true
 			s.wait(f, "waiting for the FBC render")
 			continue
 		}
 		var sl slot
-		reason := fmt.Sprintf("FBC %s: render %s", f.FBCDigest, f.RenderState)
+		reason := fmt.Sprintf("FBC %s: render %s", f.Digest, f.RenderState)
 		if f.RenderState == "rendered" {
-			if sl, reason, err = s.slotOf(ctx, stream, f); err != nil {
+			if sl, reason, err = s.slotOf(ctx, f); err != nil {
 				return err
 			}
 		}
 		if reason == "" {
-			var prev string
-			if p := slots[sl]; len(p) > 0 {
-				prev = p[len(p)-1].Release
-			} else {
+			if len(slots[sl]) == 0 {
 				order = append(order, sl)
 			}
 			slots[sl] = append(slots[sl], f)
-			for _, u := range noSlot[stream][seen[sl]:] {
-				// u's siblings in its Release, f's or its slot predecessor's, are FBCs of other slots.
-				if u.Release != f.Release && u.Release != prev {
-					gaps[[2]string{f.Release, f.FBCDigest}] = fmt.Sprintf("follows %s (%s), which has no slot", cmp.Or(u.FBCNVR, u.FBCDigest), u.Release)
+			for _, u := range noSlot[f.stream][seen[sl]:] {
+				if u.operator == f.operator && u.ocp == f.ocp {
+					gaps[f.NVR] = fmt.Sprintf("follows %s, which has no slot", u.NVR)
 				}
 			}
-			seen[sl] = len(noSlot[stream])
+			seen[sl] = len(noSlot[f.stream])
 			continue
 		}
-		done, err := s.store.RunDone(ctx, f.Release, f.FBCDigest)
+		done, err := s.store.RunDone(ctx, f.NVR, f.Digest)
 		if err != nil {
 			return err
 		}
 		if !done && f.RenderState == "rendered" {
-			wait, err := s.awaiting(ctx, f, f.FBCDigest)
+			wait, err := s.awaiting(ctx, f, f.Digest)
 			if err != nil {
 				return err
 			}
 			if wait {
 				// f's slot is not known yet, so its whole stream waits with it.
-				held[stream] = true
+				held[f.stream] = true
 				s.wait(f, "waiting for ART source: "+reason)
 				continue
 			}
 		}
-		noSlot[stream] = append(noSlot[stream], f)
+		noSlot[f.stream] = append(noSlot[f.stream], f)
 		if done {
 			continue
 		}
@@ -163,8 +190,8 @@ func (s *Sync) RunOnce(ctx context.Context) error {
 }
 
 // slotOf returns f's slot, or why it has none.
-func (s *Sync) slotOf(ctx context.Context, stream string, f StageFBC) (slot, string, error) {
-	srcs, err := s.store.SourcesByDigest(ctx, f.FBCDigest)
+func (s *Sync) slotOf(ctx context.Context, f build) (slot, string, error) {
+	srcs, err := s.store.SourcesByDigest(ctx, f.Digest)
 	if err != nil {
 		return slot{}, "", err
 	}
@@ -175,44 +202,40 @@ func (s *Sync) slotOf(ctx context.Context, stream string, f StageFBC) (slot, str
 	slices.Sort(names)
 	names = slices.Compact(names)
 	if len(names) != 1 {
-		return slot{}, fmt.Sprintf("FBC %s: %d ART names %v, want one", f.FBCDigest, len(names), names), nil
+		return slot{}, fmt.Sprintf("FBC %s: %d ART names %v, want one", f.Digest, len(names), names), nil
 	}
-	m := ocpToken.FindStringSubmatch(f.FBCNVR)
-	if m == nil {
-		return slot{}, fmt.Sprintf("FBC %s: no ocpX.Y in NVR %q", f.FBCDigest, f.FBCNVR), nil
-	}
-	return slot{stream: stream, operator: names[0], ocp: m[1]}, "", nil
+	return slot{stream: f.stream, operator: names[0], ocp: f.ocp}, "", nil
 }
 
 // reconcileSlot freezes the slot's baseline on first sight, then reconciles
 // each FBC after it against the one before, oldest first. An FBC in gaps
 // is uncertain for its reason instead.
-func (s *Sync) reconcileSlot(ctx context.Context, sl slot, fbcs []StageFBC, gaps map[[2]string]string) error {
+func (s *Sync) reconcileSlot(ctx context.Context, sl slot, fbcs []build, gaps map[string]string) error {
 	base, ok, err := s.store.GetBaseline(ctx, sl.stream, sl.operator, sl.ocp)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		latest := fbcs[len(fbcs)-1]
-		s.logger.Info("baseline", "stream", sl.stream, "operator", sl.operator, "ocp", sl.ocp, "fbc", latest.FBCNVR, "release", latest.Release)
+		s.logger.Info("baseline", "stream", sl.stream, "operator", sl.operator, "ocp", sl.ocp, "fbc", latest.NVR)
 		return s.tx(ctx, func(st Store) error {
-			if err := st.InsertBaseline(ctx, Baseline{Stream: sl.stream, Operator: sl.operator, OCP: sl.ocp, FBCDigest: latest.FBCDigest}); err != nil {
+			if err := st.InsertBaseline(ctx, Baseline{Stream: sl.stream, Operator: sl.operator, OCP: sl.ocp, FBCDigest: latest.Digest}); err != nil {
 				return err
 			}
-			return st.MarkRun(ctx, latest.Release, latest.FBCDigest)
+			return st.MarkRun(ctx, latest.NVR, latest.Digest)
 		})
 	}
 	// A baseline no longer listed was older than every FBC listed.
 	start := 0
 	for i, f := range fbcs {
-		if f.FBCDigest == base {
+		if f.Digest == base {
 			start = i + 1
 		}
 	}
 	done := make([]bool, len(fbcs))
 	last := -1
 	for i := start; i < len(fbcs); i++ {
-		if done[i], err = s.store.RunDone(ctx, fbcs[i].Release, fbcs[i].FBCDigest); err != nil {
+		if done[i], err = s.store.RunDone(ctx, fbcs[i].NVR, fbcs[i].Digest); err != nil {
 			return err
 		}
 		if done[i] {
@@ -226,13 +249,13 @@ func (s *Sync) reconcileSlot(ctx context.Context, sl slot, fbcs []StageFBC, gaps
 		}
 		if i < last {
 			// f came after a later FBC was reconciled, which may hold its fixes.
-			s.uncertain(f, fmt.Sprintf("staged before %s, which was reconciled first", fbcs[last].FBCNVR))
+			s.uncertain(f, fmt.Sprintf("built before %s, which was reconciled first", fbcs[last].NVR))
 			if err := s.record(ctx, f, nil); err != nil {
 				return err
 			}
 			continue
 		}
-		if gap := gaps[[2]string{f.Release, f.FBCDigest}]; gap != "" {
+		if gap := gaps[f.NVR]; gap != "" {
 			s.uncertain(f, gap)
 			if err := s.record(ctx, f, nil); err != nil {
 				return err
@@ -241,7 +264,7 @@ func (s *Sync) reconcileSlot(ctx context.Context, sl slot, fbcs []StageFBC, gaps
 		}
 		prev := base
 		if i > 0 {
-			prev = fbcs[i-1].FBCDigest
+			prev = fbcs[i-1].Digest
 		}
 		actions, wait, err := s.actions(ctx, sl.stream, f, prev)
 		if err != nil {
@@ -270,13 +293,13 @@ type evidence struct {
 // only new member digests are checked, and what keeps f's issues from being
 // known is logged. While the ART source of a changed member may still
 // arrive, or after a transient GitHub error, it returns why f waits instead.
-func (s *Sync) actions(ctx context.Context, stream string, f StageFBC, prev string) ([]Action, string, error) {
+func (s *Sync) actions(ctx context.Context, stream string, f build, prev string) ([]Action, string, error) {
 	var uncertain []string
 	prevSources, err := s.memberSources(ctx, prev)
 	if err != nil {
 		return nil, "", err
 	}
-	cur, err := s.memberSources(ctx, f.FBCDigest)
+	cur, err := s.memberSources(ctx, f.Digest)
 	if err != nil {
 		return nil, "", err
 	}
@@ -401,9 +424,9 @@ func (s *Sync) actions(ctx context.Context, stream string, f StageFBC, prev stri
 			return nil, "", err
 		}
 		a := Action{
-			Key:          ActionKey{FBCDigest: f.FBCDigest, IssueKey: key, Release: f.Release},
-			Assembly:     f.Assembly,
-			FBCNVR:       f.FBCNVR,
+			Key:          ActionKey{FBCDigest: f.Digest, IssueKey: key, Release: f.NVR},
+			Assembly:     f.version,
+			FBCNVR:       f.NVR,
 			EvidenceJSON: string(evJSON),
 			UpdatedAt:    now,
 		}
@@ -411,12 +434,14 @@ func (s *Sync) actions(ctx context.Context, stream string, f StageFBC, prev stri
 		if err != nil {
 			return nil, "", err
 		}
-		if ok && first.Key.FBCDigest != f.FBCDigest {
+		// Skip a key an earlier action of the stream included: another FBC's, or
+		// f's own under the Konflux Release name actions were keyed by before NVRs.
+		if ok && first.Key != a.Key {
 			a.Status = StatusSkipped
-			a.SkipReason = fmt.Sprintf("already included in %s (%s)", first.FBCNVR, first.Key.Release)
+			a.SkipReason = "already included in " + cmp.Or(first.FBCNVR, first.Key.Release)
 		} else {
 			a.Status = StatusProposed
-			a.DesiredTargetVersion = "quay-v" + f.Assembly
+			a.DesiredTargetVersion = "quay-v" + f.version
 		}
 		actions = append(actions, a)
 	}
@@ -428,23 +453,23 @@ func (s *Sync) actions(ctx context.Context, stream string, f StageFBC, prev stri
 
 // awaiting reports whether the ART source of digest may still arrive for f:
 // a stored record the source backfill has not checked yet, or no record yet
-// within provenanceWait of f's Release completing.
-func (s *Sync) awaiting(ctx context.Context, f StageFBC, digest string) (bool, error) {
+// within provenanceWait of f's build starting.
+func (s *Sync) awaiting(ctx context.Context, f build, digest string) (bool, error) {
 	stored, unchecked, err := s.store.SourceState(ctx, digest)
 	if err != nil || unchecked {
 		return unchecked, err
 	}
-	completed, err := time.Parse(time.RFC3339, f.CompletionTime)
-	return !stored && err == nil && s.now().Sub(completed) < provenanceWait, nil
+	// ART gives the start time in UTC with no zone.
+	started, err := time.Parse("2006-01-02T15:04:05", f.StartTime)
+	return !stored && err == nil && s.now().Sub(started) < provenanceWait, nil
 }
 
 // wait leaves f not done because of why, logging each new why once: a
 // wait on an unchecked record has no bound.
-func (s *Sync) wait(f StageFBC, why string) {
-	k := [2]string{f.Release, f.FBCDigest}
-	if s.waiting[k] != why {
-		s.waiting[k] = why
-		s.logger.Info("waiting", "release", f.Release, "fbc", f.FBCNVR, "reason", why)
+func (s *Sync) wait(f build, why string) {
+	if s.waiting[f.NVR] != why {
+		s.waiting[f.NVR] = why
+		s.logger.Info("waiting", "fbc", f.NVR, "reason", why)
 	}
 }
 
@@ -501,29 +526,29 @@ func (s *Sync) branch(ctx context.Context, c component, stream, prev, cur string
 }
 
 // uncertain logs why some of f's issues may not be known.
-func (s *Sync) uncertain(f StageFBC, reasons ...string) {
+func (s *Sync) uncertain(f build, reasons ...string) {
 	slices.Sort(reasons)
-	s.logger.Warn("uncertain", "release", f.Release, "fbc", cmp.Or(f.FBCNVR, f.FBCDigest), "reasons", strings.Join(slices.Compact(reasons), "; "))
+	s.logger.Warn("uncertain", "fbc", f.NVR, "reasons", strings.Join(slices.Compact(reasons), "; "))
 }
 
 // record stores f's actions and marks it done in one transaction, so a
 // restart neither repeats nor loses it, then logs what each proposed action
 // would write: with the writer off, the log is the only place it shows.
-func (s *Sync) record(ctx context.Context, f StageFBC, actions []Action) error {
+func (s *Sync) record(ctx context.Context, f build, actions []Action) error {
 	err := s.tx(ctx, func(st Store) error {
 		for _, a := range actions {
 			if err := st.UpsertAction(ctx, a); err != nil {
 				return err
 			}
 		}
-		return st.MarkRun(ctx, f.Release, f.FBCDigest)
+		return st.MarkRun(ctx, f.NVR, f.Digest)
 	})
 	if err != nil {
 		return err
 	}
 	for _, a := range actions {
 		if a.Status == StatusProposed {
-			s.logger.Info("proposed", "issue", a.Key.IssueKey, "fbc", a.FBCNVR, "release", a.Key.Release,
+			s.logger.Info("proposed", "issue", a.Key.IssueKey, "fbc", a.FBCNVR,
 				"target_version_add", a.DesiredTargetVersion, "target_version_remove", placeholder(a.DesiredTargetVersion),
 				"transition", "Verified -> "+releasePending+", when Verified", "comment", "FBC stamp")
 		}

@@ -2,21 +2,6 @@
 // fix.
 package reconcile
 
-import "regexp"
-
-// assemblyStream matches an X.Y.Z assembly; its group is the X.Y stream.
-var assemblyStream = regexp.MustCompile(`^([0-9]+\.[0-9]+)\.[0-9]+$`)
-
-// streamOf returns the stream of an X.Y.Z assembly. Every stream ART stages
-// an FBC for is reconciled.
-func streamOf(assembly string) (string, bool) {
-	m := assemblyStream.FindStringSubmatch(assembly)
-	if m == nil {
-		return "", false
-	}
-	return m[1], true
-}
-
 // component is an allowlisted ART build's public repository. Its commits
 // land on redhat-{stream}, or, with a branchPrefix, on the one branch of
 // that prefix holding the commit.

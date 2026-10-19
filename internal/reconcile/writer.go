@@ -235,7 +235,7 @@ func (w *Writer) comment(ctx context.Context, a *Action) error {
 		return nil
 	}
 	quayURL := artbuild.PageURL(w.artURL, records[quay].NVR, records[quay].RecordID)
-	body := fmt.Sprintf("This fix is staged for %s. [FBC build|%s] [quay build|%s]", a.DesiredTargetVersion, fbcURL, quayURL)
+	body := fmt.Sprintf("This fix is in ART FBC build %s for %s. [FBC build|%s] [quay build|%s]", records[fbc].NVR, a.DesiredTargetVersion, fbcURL, quayURL)
 	if err := w.jira.AddComment(ctx, a.Key.IssueKey, body); err != nil {
 		return err
 	}

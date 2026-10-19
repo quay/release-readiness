@@ -9,7 +9,6 @@ import (
 
 	"github.com/quay/release-readiness/internal/artbuild"
 	"github.com/quay/release-readiness/internal/fbc"
-	"github.com/quay/release-readiness/internal/model"
 	"github.com/quay/release-readiness/internal/reconcile"
 )
 
@@ -87,22 +86,9 @@ func TestReconcileStore(t *testing.T) {
 
 	t0 := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
 	at := func(m int) *time.Time { v := t0.Add(time.Duration(m) * time.Minute); return &v }
-	stage := func(snap, assembly, env, digest, status, reason string, completed *time.Time) {
+	build := func(id, group, typ, nvr, digest, start string) {
 		t.Helper()
-		if err := d.UpsertStagedSnapshot(ctx, snap, assembly, "fbc", env); err != nil {
-			t.Fatal(err)
-		}
-		id, err := d.CreateSnapshot(ctx, "fbc-quay", snap, t0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := d.CreateSnapshotComponent(ctx, id, "fbc-quay-operator", "quay.io/fbc@"+digest); err != nil {
-			t.Fatal(err)
-		}
-		if err := d.UpsertKonfluxRelease(ctx, &model.KonfluxRelease{
-			Name: "rel-" + snap, Application: "fbc-quay", Snapshot: snap,
-			ReleasedStatus: status, ReleasedReason: reason, CreatedAt: t0, CompletionTime: completed,
-		}); err != nil {
+		if err := d.UpsertArtHistoryBuild(ctx, artbuild.HistoryBuild{RecordID: id, Group: group, Type: typ, NVR: nvr, Digest: digest, Pullspec: "quay.io/fbc@" + digest, StartTime: start}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -112,12 +98,22 @@ func TestReconcileStore(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	stage("a", "3.17.1", "stage", "sha256:a", "True", "Succeeded", at(20))
-	stage("b", "3.18.1", "stage", "sha256:b", "True", "Succeeded", at(10))
-	stage("unrendered", "3.18.1", "stage", "sha256:c", "True", "Succeeded", at(30))
-	stage("prod", "3.18.1", "prod", "sha256:d", "True", "Succeeded", at(40))
-	stage("failed", "3.18.1", "stage", "sha256:e", "False", "Failed", at(50))
-	stage("new", "3.18.2", "stage", "sha256:f", "True", "Succeeded", at(60))
+	build("rec-a", "quay-3.17", artbuild.TypeFBC, "fbc-a.ocp4.16", "sha256:a", "2026-10-14T01:00:00")
+	build("rec-b", "quay-3.18", artbuild.TypeFBC, "fbc-b.ocp4.16", "sha256:b", "2026-10-14T00:30:00")
+	build("rec-c", "quay-3.18", artbuild.TypeFBC, "fbc-c.ocp4.16", "sha256:c", "2026-10-14T01:00:00")
+	build("rec-n", "quay-3.18", artbuild.TypeFBC, "fbc-n.ocp4.16", "sha256:n", "2026-10-14T02:00:00")
+	build("rec-i", "quay-3.18", "image", "quay-i", "sha256:i", "2026-10-14T00:00:00")
+	build("rec-x", "quay-3.18", artbuild.TypeFBC, "fbc-x.ocp4.16", "", "2026-10-14T00:00:00")
+	if err := d.UpsertStagedSnapshot(ctx, "snap-c", "3.18.1", "fbc", "stage"); err != nil {
+		t.Fatal(err)
+	}
+	id, err := d.CreateSnapshot(ctx, "fbc-quay", "snap-c", t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.CreateSnapshotComponent(ctx, id, "fbc-quay-operator", "quay.io/fbc@sha256:c"); err != nil {
+		t.Fatal(err)
+	}
 	render("sha256:a", fbc.StateRendered, "label-a.ocp4.16", fbc.Channel{
 		HeadBundlePullspec: "reg/bundle@sha256:bun",
 		HeadRelatedImages:  []fbc.RelatedImage{{Name: "quay", Image: "reg/quay@sha256:q"}, {Name: "pg", Image: "reg/pg:15"}},
@@ -125,24 +121,19 @@ func TestReconcileStore(t *testing.T) {
 	})
 	render("sha256:b", fbc.StateRendered, "label-b.ocp4.16", fbc.Channel{})
 	render("sha256:c", fbc.StateFailed, "", fbc.Channel{})
-	render("sha256:d", fbc.StateRendered, "label-d", fbc.Channel{})
-	render("sha256:e", fbc.StateRendered, "label-e", fbc.Channel{})
-	if err := d.UpsertArtHistoryBuild(ctx, artbuild.HistoryBuild{RecordID: "rec-a", Group: "quay-3.17", Type: artbuild.TypeFBC, NVR: "fbc-a.ocp4.16", Digest: "sha256:a", Pullspec: "quay.io/fbc@sha256:a"}); err != nil {
-		t.Fatal(err)
-	}
 
-	fbcs, err := d.ListStageFBCs(ctx)
+	builds, err := d.ListFBCBuilds(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantFBCs := []reconcile.StageFBC{
-		{Release: "rel-b", Assembly: "3.18.1", CompletionTime: at(10).Format(time.RFC3339), FBCDigest: "sha256:b", FBCNVR: "label-b.ocp4.16", RenderState: fbc.StateRendered},
-		{Release: "rel-a", Assembly: "3.17.1", CompletionTime: at(20).Format(time.RFC3339), FBCDigest: "sha256:a", FBCNVR: "fbc-a.ocp4.16", RenderState: fbc.StateRendered},
-		{Release: "rel-unrendered", Assembly: "3.18.1", CompletionTime: at(30).Format(time.RFC3339), FBCDigest: "sha256:c", RenderState: fbc.StateFailed},
-		{Release: "rel-new", Assembly: "3.18.2", CompletionTime: at(60).Format(time.RFC3339), FBCDigest: "sha256:f"},
+	wantBuilds := []reconcile.FBCBuild{
+		{Group: "quay-3.18", NVR: "fbc-b.ocp4.16", Digest: "sha256:b", StartTime: "2026-10-14T00:30:00", RenderState: fbc.StateRendered},
+		{Group: "quay-3.17", NVR: "fbc-a.ocp4.16", Digest: "sha256:a", StartTime: "2026-10-14T01:00:00", RenderState: fbc.StateRendered},
+		{Group: "quay-3.18", NVR: "fbc-c.ocp4.16", Digest: "sha256:c", StartTime: "2026-10-14T01:00:00", RenderState: fbc.StateFailed, Staged: true},
+		{Group: "quay-3.18", NVR: "fbc-n.ocp4.16", Digest: "sha256:n", StartTime: "2026-10-14T02:00:00"},
 	}
-	if !slices.Equal(fbcs, wantFBCs) {
-		t.Errorf("stage FBCs:\n%+v\nwant:\n%+v", fbcs, wantFBCs)
+	if !slices.Equal(builds, wantBuilds) {
+		t.Errorf("FBC builds:\n%+v\nwant:\n%+v", builds, wantBuilds)
 	}
 	if got, err := d.FBCMemberDigests(ctx, "sha256:a"); err != nil || !slices.Equal(got, []string{"reg/pg:15", "sha256:bun", "sha256:q", "sha256:a"}) {
 		t.Errorf("members of sha256:a: %v, %v", got, err)

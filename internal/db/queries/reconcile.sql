@@ -62,25 +62,23 @@ WHERE issue_key = sqlc.arg(issue_key)
 ORDER BY updated_at, release_name
 LIMIT 1;
 
--- name: ListStageFBCs :many
--- Each catalog of an FBC Snapshot ART staged for stage whose Release
--- succeeded, across all assemblies, oldest completion first, with the state
--- of its render, empty before the first, and the NVR of its ART FBC build, else
--- its rendered label.
-SELECT kr.name AS release_name, ss.assembly, kr.completion_time,
-       CAST(substr(sc.image_url, instr(sc.image_url, '@') + 1) AS TEXT) AS fbc_digest,
+-- name: ListFBCBuilds :many
+-- Each successful ART FBC build, oldest first, with the state of its render,
+-- empty before the first, and whether an FBC Snapshot ART staged holds it.
+WITH staged AS (
+    SELECT substr(sc.image_url, instr(sc.image_url, '@') + 1) AS digest
+    FROM staged_snapshots ss
+    JOIN snapshots s ON s.name = ss.name
+    JOIN snapshot_components sc ON sc.snapshot_id = s.id
+    WHERE ss.kind = 'fbc' AND instr(sc.image_url, '@sha256:') > 0
+)
+SELECT h.group_name, h.nvr, h.digest, h.start_time,
        CAST(COALESCE(r.state, '') AS TEXT) AS render_state,
-       CAST(COALESCE((SELECT h.nvr FROM art_history_records h
-                      WHERE h.build_type = 'fbc' AND h.digest = substr(sc.image_url, instr(sc.image_url, '@') + 1)
-                      ORDER BY h.start_time DESC, h.nvr DESC LIMIT 1), r.label_nvr, '') AS TEXT) AS fbc_nvr
-FROM staged_snapshots ss
-JOIN snapshots s ON s.name = ss.name
-JOIN snapshot_components sc ON sc.snapshot_id = s.id
-JOIN konflux_releases kr ON kr.snapshot = s.name AND kr.application = s.application
-LEFT JOIN fbc_renders r ON r.digest = substr(sc.image_url, instr(sc.image_url, '@') + 1)
-WHERE ss.kind = 'fbc' AND ss.env = 'stage' AND instr(sc.image_url, '@sha256:') > 0
-  AND kr.released_status = 'True' AND kr.released_reason = 'Succeeded' AND kr.completion_time != ''
-ORDER BY kr.completion_time, kr.name, fbc_digest;
+       CAST(h.digest IN (SELECT digest FROM staged) AS BOOLEAN) AS staged
+FROM art_history_records h
+LEFT JOIN fbc_renders r ON r.digest = h.digest
+WHERE h.build_type = 'fbc' AND substr(h.digest, 1, 7) = 'sha256:'
+ORDER BY h.start_time, h.nvr;
 
 -- name: ListFBCMemberDigests :many
 -- The digests of a rendered FBC's head bundle and its related images; a

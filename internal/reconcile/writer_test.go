@@ -115,9 +115,9 @@ func applyPending(t *testing.T, w *Writer) {
 
 func TestWriterDisabled(t *testing.T) {
 	fx := newFixture(t)
-	fx.stage("r1", "3.18.1", "sha256:f1", sha(1), sha(100))
+	fx.build("3.18.1", "sha256:f1", sha(1), sha(100))
 	fx.run(t)
-	fx.stage("r2", "3.18.2", "sha256:f2", sha(2), sha(100))
+	fx.build("3.18.2", "sha256:f2", sha(2), sha(100))
 	fx.commits.ranges[quayRepo+" redhat-3.18 "+sha(1)+" "+sha(2)] = []Commit{{SHA: sha(2), Message: "PROJQUAY-1 fix"}}
 	j := newFakeJira("Verified", "quay-v3.18.z")
 	fx.run(t)
@@ -179,7 +179,7 @@ func TestWriterComment(t *testing.T) {
 	a.DesiredTargetVersion = "quay-v3.17.6"
 	store.actions[writeKey] = a
 	applyPending(t, w)
-	want := "This fix is staged for quay-v3.17.6. [FBC build|https://art-build-history-art-build-history.apps.artc2023.pc3z.p1.openshiftapps.com/build?nvr=quay-operator-fbc-3.17.6-20261013001348.ocp4.17&record_id=f1a90dd2-d988-875b-07ae-a39919d5e837] [quay build|https://art-build-history-art-build-history.apps.artc2023.pc3z.p1.openshiftapps.com/build?nvr=quay-quay-container-3.17.6-202610092311.p2.gb60532b.assembly.stream.el9&record_id=3a7f2b70-c546-f188-cdae-95adfc79aa78]"
+	want := "This fix is in ART FBC build quay-operator-fbc-3.17.6-20261013001348.ocp4.17 for quay-v3.17.6. [FBC build|https://art-build-history-art-build-history.apps.artc2023.pc3z.p1.openshiftapps.com/build?nvr=quay-operator-fbc-3.17.6-20261013001348.ocp4.17&record_id=f1a90dd2-d988-875b-07ae-a39919d5e837] [quay build|https://art-build-history-art-build-history.apps.artc2023.pc3z.p1.openshiftapps.com/build?nvr=quay-quay-container-3.17.6-202610092311.p2.gb60532b.assembly.stream.el9&record_id=3a7f2b70-c546-f188-cdae-95adfc79aa78]"
 	if len(j.comments) != 1 || j.comments[0].Body != want {
 		t.Errorf("comments %+v; want one %q", j.comments, want)
 	}
