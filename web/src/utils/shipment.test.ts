@@ -35,9 +35,9 @@ test("shipmentChip stages", () => {
 		tooltip: "!948 · Stage released",
 	});
 	assert.deepEqual(shipmentChip(mr({ stage: "prod_released" })), {
-		text: "Prod released",
+		text: "Shipment MR open",
 		status: "info",
-		tooltip: "!948 · Prod released",
+		tooltip: "!948 · Shipment MR open",
 	});
 	assert.deepEqual(shipmentChip(mr({ stage: "shipped", state: "merged" })), {
 		text: "Shipment MR: shipped",
@@ -72,15 +72,18 @@ test("shipmentFlags", () => {
 		shipmentFlags(mr({ pipeline_failed: true, needs_approval: true })),
 		["Pipeline failed", "Needs approval"],
 	);
+	assert.deepEqual(shipmentFlags(mr({ stage: "prod_released" })), [
+		"Production release succeeded",
+	]);
 });
 
 test("shipmentLabel reports shipped only after the MR merges", () => {
 	assert.deepEqual(
 		shipmentLabel(mr({ stage: "prod_released", needs_approval: true })),
 		{
-			text: "Prod released",
+			text: "Shipment MR open",
 			status: "info",
-			tooltip: "!948 · Prod released",
+			tooltip: "!948 · Shipment MR open",
 		},
 	);
 	assert.equal(

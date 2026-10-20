@@ -63,7 +63,8 @@ test("shows an open shipment MR as unshipped even after the version releases", a
 	await page.goto("/");
 
 	const shipment = page.locator(`a[href="${mrURL}"]`);
-	await expect(shipment).toHaveText("Prod released");
+	await expect(shipment).toHaveText("MR open");
+	await expect(page.getByText("Production release succeeded")).toBeVisible();
 	await expect(shipment).not.toHaveText("MR shipped");
 	await expect(page.getByText("Shipment MR: shipped", { exact: true })).toHaveCount(
 		0,
