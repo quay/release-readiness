@@ -8,7 +8,8 @@
 		"lint:fix": "biome check --write .",
 		"dev": "vite",
 		"build": "tsc -b && vite build",
-		"test": "node --test src/utils/blockers.test.ts src/utils/fbcMatrix.test.ts src/utils/format.test.ts src/utils/links.test.ts src/utils/releaseDetail.test.ts src/utils/shipment.test.ts"
+		"test": "node --test src/utils/blockers.test.ts src/utils/fbcMatrix.test.ts src/utils/format.test.ts src/utils/links.test.ts src/utils/releaseDetail.test.ts src/utils/shipment.test.ts",
+		"test:e2e": "playwright test"
 	},
 	"dependencies": {
 		"@patternfly/react-core": "^6.0.0",
@@ -20,6 +21,7 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.0.0",
+		"@playwright/test": "^1.64.1",
 		"@types/react": "^19.0.0",
 		"@types/react-dom": "^19.0.0",
 		"@vitejs/plugin-react": "^6.0.0",

@@ -49,6 +49,12 @@ jobs:
       - name: Build
         run: npx vite build
 
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: UI test
+        run: npm run test:e2e
+
   image:
     runs-on: ubuntu-latest
     steps:
