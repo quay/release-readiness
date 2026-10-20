@@ -33,7 +33,6 @@ export function shipmentChip(mr: ShipmentMR): {
 /** A shipment MR's flags, only those set. */
 export function shipmentFlags(mr: ShipmentMR): string[] {
 	const flags: string[] = [];
-	if (mr.stage === "prod_released") flags.push("Production release succeeded");
 	if (mr.pipeline_failed) flags.push("Pipeline failed");
 	if (mr.needs_approval) flags.push("Needs approval");
 	return flags;

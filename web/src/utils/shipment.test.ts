@@ -72,9 +72,6 @@ test("shipmentFlags", () => {
 		shipmentFlags(mr({ pipeline_failed: true, needs_approval: true })),
 		["Pipeline failed", "Needs approval"],
 	);
-	assert.deepEqual(shipmentFlags(mr({ stage: "prod_released" })), [
-		"Production release succeeded",
-	]);
 });
 
 test("shipmentLabel reports shipped only after the MR merges", () => {
