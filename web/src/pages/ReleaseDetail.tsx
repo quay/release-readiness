@@ -455,7 +455,7 @@ function ReleaseFacts({
 				<DescriptionListGroup>
 					<DescriptionListTerm>Shipment</DescriptionListTerm>
 					<DescriptionListDescription>
-						<ShipmentLabels mr={mr} shipped={shipped} />
+						<ShipmentLabels mr={mr} />
 					</DescriptionListDescription>
 				</DescriptionListGroup>
 			)}

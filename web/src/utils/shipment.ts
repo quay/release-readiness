@@ -38,19 +38,13 @@ export function shipmentFlags(mr: ShipmentMR): string[] {
 	return flags;
 }
 
-/**
- * A version's one shipment MR label, linking the MR. Once the version
- * shipped it reads "Shipment MR: shipped", whatever the MR's stage: ART can
- * merge it after the release.
- */
-export function shipmentLabel(
-	mr: ShipmentMR,
-	shipped: boolean,
-): { text: string; status: Status; tooltip: string } {
-	const chip = shipmentChip(mr);
-	return shipped
-		? { ...chip, text: "Shipment MR: shipped", status: "success" }
-		: chip;
+/** A shipment MR's state label, linking the MR. */
+export function shipmentLabel(mr: ShipmentMR): {
+	text: string;
+	status: Status;
+	tooltip: string;
+} {
+	return shipmentChip(mr);
 }
 
 /**

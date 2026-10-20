@@ -26,15 +26,9 @@ export function mrLink(mr: ShipmentMR, title?: string): LabelProps["render"] {
 }
 
 /** A version's ART shipment MR label, linking it, and its flags as text. */
-export function ShipmentLabels({
-	mr,
-	shipped,
-}: {
-	mr: ShipmentMR;
-	shipped: boolean;
-}) {
-	const label = shipmentLabel(mr, shipped);
-	const flags = shipped ? [] : shipmentFlags(mr);
+export function ShipmentLabels({ mr }: { mr: ShipmentMR }) {
+	const label = shipmentLabel(mr);
+	const flags = shipmentFlags(mr);
 	return (
 		<>
 			<Label isCompact status={label.status} render={mrLink(mr, label.tooltip)}>
@@ -50,15 +44,9 @@ export function ShipmentLabels({
 }
 
 /** The shipment MR's state as its icon and a link naming it, no filled label. */
-export function ShipmentLink({
-	mr,
-	shipped,
-}: {
-	mr: ShipmentMR;
-	shipped: boolean;
-}) {
-	const label = shipmentLabel(mr, shipped);
-	const flags = shipped ? [] : shipmentFlags(mr);
+export function ShipmentLink({ mr }: { mr: ShipmentMR }) {
+	const label = shipmentLabel(mr);
+	const flags = shipmentFlags(mr);
 	return (
 		<span
 			style={{ display: "inline-flex", gap: "0.5rem", alignItems: "center" }}

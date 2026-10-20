@@ -236,9 +236,7 @@ function ReleaseRow({ ov, narrow }: { ov: ReleaseOverview; narrow: boolean }) {
 	const candidateCell = (
 		<CandidateCell ov={ov} data={candidate.data} error={candidate.error} />
 	);
-	const shipment = ov.shipment_mr && (
-		<ShipmentLink mr={ov.shipment_mr} shipped={shipped} />
-	);
+	const shipment = ov.shipment_mr && <ShipmentLink mr={ov.shipment_mr} />;
 	const ticketLink = ticket && (
 		<ExtLink
 			href={jiraIssueUrl(
