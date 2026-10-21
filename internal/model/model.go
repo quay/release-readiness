@@ -27,6 +27,9 @@ type ReleaseOverview struct {
 	// Shipped is set when the catalog published the version's tag or JIRA
 	// marks it released.
 	Shipped bool `json:"-"`
+	// ShippedAt is when the catalog first published the version, nil when
+	// it has not or gave no date.
+	ShippedAt *time.Time `json:"shipped_at,omitempty"`
 	// NextInStream marks the lowest unshipped z of its product and major.minor.
 	NextInStream bool `json:"next_in_stream"`
 	// ShipmentMR is nil until the version's shipment MR is found.

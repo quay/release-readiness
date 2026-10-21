@@ -38,7 +38,8 @@ type imagesPage struct {
 	Total int `json:"total"`
 	Data  []struct {
 		Repositories []struct {
-			Published bool `json:"published"`
+			Published bool      `json:"published"`
+			PushDate  time.Time `json:"push_date"`
 			Tags      []struct {
 				Name string `json:"name"`
 			} `json:"tags"`
@@ -46,14 +47,15 @@ type imagesPage struct {
 	} `json:"data"`
 }
 
-// PublishedTags returns every tag of a published image in repository.
-func (c *Client) PublishedTags(ctx context.Context, repository string) ([]string, error) {
-	var tags []string
+// PublishedTags returns every tag of a published image in repository, with
+// the earliest push date of the images carrying it.
+func (c *Client) PublishedTags(ctx context.Context, repository string) (map[string]time.Time, error) {
+	tags := make(map[string]time.Time)
 	for page, seen := 0, 0; ; page++ {
 		q := url.Values{
 			"page_size": {"500"},
 			"page":      {strconv.Itoa(page)},
-			"include":   {"total,data.repositories.published,data.repositories.tags.name"},
+			"include":   {"total,data.repositories.published,data.repositories.push_date,data.repositories.tags.name"},
 		}
 		path := "/repositories/registry/registry.access.redhat.com/repository/" + repository + "/images?" + q.Encode()
 		var p imagesPage
@@ -66,7 +68,7 @@ func (c *Client) PublishedTags(ctx context.Context, repository string) ([]string
 					continue
 				}
 				for _, t := range r.Tags {
-					tags = append(tags, t.Name)
+					keepEarliest(tags, t.Name, r.PushDate)
 				}
 			}
 		}
@@ -74,6 +76,14 @@ func (c *Client) PublishedTags(ctx context.Context, repository string) ([]string
 		if len(p.Data) == 0 || seen >= p.Total {
 			return tags, nil
 		}
+	}
+}
+
+// keepEarliest records at for key unless an earlier time is recorded. A zero
+// time, a push date the catalog left out, never replaces a known one.
+func keepEarliest(m map[string]time.Time, key string, at time.Time) {
+	if old, ok := m[key]; !ok || !at.IsZero() && (old.IsZero() || at.Before(old)) {
+		m[key] = at
 	}
 }
 
@@ -99,7 +109,7 @@ type Shipped struct {
 	client   *Client
 	logger   *slog.Logger
 	mu       sync.RWMutex
-	versions map[string]bool // "product X.Y.Z"
+	versions map[string]time.Time // "product X.Y.Z" to its first push
 	// Status receives each refresh's outcome; nil reports nowhere.
 	Status *syncstatus.Source
 }
@@ -126,7 +136,8 @@ func (s *Shipped) Run(ctx context.Context, interval time.Duration) {
 // Refresh replaces the published set only when every repository was read,
 // so a failed pass keeps the last good one.
 func (s *Shipped) Refresh(ctx context.Context) {
-	versions := make(map[string]bool)
+	versions := make(map[string]time.Time)
+	dates := make(map[string]time.Time)
 	for product, repos := range Repositories {
 		for _, repo := range repos {
 			tags, err := s.client.PublishedTags(ctx, repo)
@@ -135,11 +146,24 @@ func (s *Shipped) Refresh(ctx context.Context) {
 				s.Status.Report(fmt.Errorf("read %s: %w", repo, err))
 				return
 			}
-			// OMR tags drop the v prefix from 2.0.9 on.
-			for _, t := range tags {
-				versions[product+" "+strings.TrimPrefix(t, "v")] = true
+			for t, at := range tags {
+				// OMR tags drop the v prefix from 2.0.9 on.
+				v := strings.TrimPrefix(t, "v")
+				// A respin moves the floating X.Y.Z tag to its new image; the
+				// X.Y.Z-<build> tag stays on the first, so it dates the version.
+				if base, build, ok := strings.Cut(v, "-"); ok {
+					if _, err := strconv.ParseUint(build, 10, 64); err == nil {
+						keepEarliest(dates, product+" "+base, at)
+						continue
+					}
+				}
+				versions[product+" "+v] = time.Time{}
+				keepEarliest(dates, product+" "+v, at)
 			}
 		}
+	}
+	for k := range versions {
+		versions[k] = dates[k]
 	}
 	s.mu.Lock()
 	s.versions = versions
@@ -151,10 +175,19 @@ func (s *Shipped) Refresh(ctx context.Context) {
 // Has reports whether product version X.Y.Z is published. A nil Shipped
 // (catalog disabled) has nothing published.
 func (s *Shipped) Has(product, version string) bool {
+	_, ok := s.ShippedAt(product, version)
+	return ok
+}
+
+// ShippedAt returns when product version X.Y.Z was first pushed to the
+// catalog, and whether it is published at all; the time is zero when the
+// catalog gave no push date. A nil Shipped has nothing published.
+func (s *Shipped) ShippedAt(product, version string) (time.Time, bool) {
 	if s == nil {
-		return false
+		return time.Time{}, false
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.versions[product+" "+version]
+	at, ok := s.versions[product+" "+version]
+	return at, ok
 }

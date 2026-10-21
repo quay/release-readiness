@@ -116,10 +116,6 @@ func (s *Server) latestBuild(ctx context.Context, rel *model.ReleaseVersion, str
 	return latest, nil
 }
 
-func (s *Server) catalogShipped(name string) bool {
-	return s.selector.CatalogShipped(name)
-}
-
 func (s *Server) handleReleasesOverview(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	releases, err := s.db.ListAllReleaseVersions(ctx)
@@ -153,7 +149,7 @@ func (s *Server) handleReleasesOverview(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		catalogShipped := s.catalogShipped(rel.Name)
+		shippedAt, catalogShipped := s.selector.CatalogShippedAt(rel.Name)
 		overviews[i] = model.ReleaseOverview{
 			Release:      rel,
 			IssueSummary: summary,
@@ -161,6 +157,9 @@ func (s *Server) handleReleasesOverview(w http.ResponseWriter, r *http.Request) 
 			LatestBuild:  latest,
 			Shipped:      catalogShipped || rel.Released,
 			ShipmentMR:   mrs[rel.Name],
+		}
+		if !shippedAt.IsZero() {
+			overviews[i].ShippedAt = &shippedAt
 		}
 	}
 	markNextInStream(overviews)

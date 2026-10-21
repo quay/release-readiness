@@ -7,6 +7,7 @@ import (
 	"context"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/quay/release-readiness/internal/catalog"
 	"github.com/quay/release-readiness/internal/db"
@@ -35,8 +36,15 @@ func NewSelector(database *db.DB, shipped *catalog.Shipped) *Selector {
 // CatalogShipped reports whether the catalog publishes the fixVersion, e.g.
 // quay-v3.17.5 as quay 3.17.5.
 func (s *Selector) CatalogShipped(name string) bool {
+	_, ok := s.CatalogShippedAt(name)
+	return ok
+}
+
+// CatalogShippedAt returns when the catalog first published the fixVersion,
+// and whether it has.
+func (s *Selector) CatalogShippedAt(name string) (time.Time, bool) {
 	product, version, _ := strings.Cut(name, "-v")
-	return s.shipped.Has(product, version)
+	return s.shipped.ShippedAt(product, version)
 }
 
 // ShipmentVersions returns the quay-vX.Y.Z versions whose shipment MRs are

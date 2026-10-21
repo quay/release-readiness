@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -487,8 +488,13 @@ func TestMarkNextInStream(t *testing.T) {
 func TestReleasesOverviewShipped(t *testing.T) {
 	srv := setupTestServer(t)
 	ctx := t.Context()
+	// quay-rhel8 pushed 3.17.5 before quay-rhel9 did.
 	cat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"total":1,"data":[{"repositories":[{"published":true,"tags":[{"name":"v3.17.5"}]}]}]}`))
+		at := "2026-10-02T00:00:00Z"
+		if strings.Contains(r.URL.Path, "quay-rhel8") {
+			at = "2026-10-01T00:00:00Z"
+		}
+		_, _ = w.Write([]byte(`{"total":1,"data":[{"repositories":[{"published":true,"push_date":"` + at + `","tags":[{"name":"v3.17.5"}]}]}]}`))
 	}))
 	defer cat.Close()
 	shipped := catalog.NewShipped(catalog.NewClient(cat.URL, cat.Client()), slog.Default())
@@ -521,6 +527,16 @@ func TestReleasesOverviewShipped(t *testing.T) {
 	}
 	if len(overviews) != len(want) {
 		t.Errorf("overviews: got %d, want %d", len(overviews), len(want))
+	}
+	// Only the catalog dates a shipped version: JIRA's released 3.18.0 has none.
+	for _, ov := range overviews {
+		if ov.Release.Name == "quay-v3.17.5" {
+			if want := mustTime(t, "2026-10-01T00:00:00Z"); ov.ShippedAt == nil || !ov.ShippedAt.Equal(want) {
+				t.Errorf("%s: shipped_at %v, want %v", ov.Release.Name, ov.ShippedAt, want)
+			}
+		} else if ov.ShippedAt != nil {
+			t.Errorf("%s: shipped_at %v, want none", ov.Release.Name, ov.ShippedAt)
+		}
 	}
 
 	for _, mr := range []model.ShipmentMR{
