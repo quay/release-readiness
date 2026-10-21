@@ -27,7 +27,6 @@ import type { ReleaseCandidate, ReleaseOverview } from "../api/types";
 import LoadError, { Loading } from "../components/LoadError";
 import OpenIn from "../components/OpenIn";
 import { ExtLink, external, useNarrow } from "../components/OperatorImages";
-import { ShipmentLink } from "../components/ShipmentLabels";
 import { useCachedFetch } from "../hooks/useCachedFetch";
 import { useConfig } from "../hooks/useConfig";
 import { blockers } from "../utils/blockers";
@@ -37,7 +36,7 @@ import {
 	streamFbc,
 	type Tone,
 } from "../utils/fbcMatrix";
-import { days, due } from "../utils/format";
+import { day, days, due } from "../utils/format";
 import {
 	ART_PIPELINES_HEALTH_URL,
 	formatReleaseName,
@@ -47,6 +46,7 @@ import { fbcGroups, verdictEntries } from "../utils/releaseDetail";
 
 const muted = { color: "var(--pf-t--global--text--color--subtle)" };
 const dash = <span style={muted}>–</span>;
+const nowrap = { whiteSpace: "nowrap" } as const;
 
 const releasePath = (name: string) => `/releases/${encodeURIComponent(name)}`;
 
@@ -166,12 +166,10 @@ export default function ReleasesOverview() {
 							</Tr>
 						) : (
 							<Tr>
-								<Th>Release</Th>
-								<Th>Target</Th>
-								<Th>Release candidate</Th>
-								<Th>Shipment</Th>
-								<Th>Ticket</Th>
-								<Th>Assignee</Th>
+								<Th width={20}>Release</Th>
+								<Th width={25}>Ship date</Th>
+								<Th width={25}>Ticket</Th>
+								<Th width={30}>Assignee</Th>
 							</Tr>
 						)}
 					</Thead>
@@ -188,7 +186,8 @@ export default function ReleasesOverview() {
 
 /**
  * One release's facts in a row, its candidate read from the release page's
- * API. Narrow, the row is two lines: version and candidate, then the rest.
+ * API. Narrow, the row is two lines: version, candidate and date, then the
+ * ticket and assignee.
  */
 function ReleaseRow({ ov, narrow }: { ov: ReleaseOverview; narrow: boolean }) {
 	const config = useConfig();
@@ -196,9 +195,7 @@ function ReleaseRow({ ov, narrow }: { ov: ReleaseOverview; narrow: boolean }) {
 	const candidate = useCachedFetch(`candidate:${r.name}`, () =>
 		getCandidate(r.name),
 	);
-	const shipped = candidate.data?.shipped ?? r.released;
-	const target = r.due_date ?? r.release_date;
-	const dueDate = target ? due(target, shipped) : undefined;
+	const shipped = candidate.data?.shipped ?? (r.released || !!ov.shipped_at);
 	const ticket = r.release_ticket_key;
 	const verdict = candidate.data?.verdict;
 	const blockerCount =
@@ -207,36 +204,35 @@ function ReleaseRow({ ov, narrow }: { ov: ReleaseOverview; narrow: boolean }) {
 					.filter((e) => e.level === "blocker")
 					.reduce((n, e) => n + e.count, 0)
 			: 0;
-	const flag =
-		dueDate?.kind === "past"
-			? "Past due"
-			: dueDate?.kind === "soon"
-				? dueDate.days === 0
-					? "Due today"
-					: `Due in ${days(dueDate.days)}`
-				: null;
-	const name = (
-		<>
-			<Link to={releasePath(r.name)} style={{ fontWeight: 600 }}>
-				{formatReleaseName(r.name)}
-			</Link>
-			{/* What blocks it, for screen readers only: no visible verdict. */}
-			<span role="status" className="pf-v6-screen-reader">
-				{blockerCount > 0 &&
-					`${formatReleaseName(r.name)}: ${blockerCount} blocker${blockerCount === 1 ? "" : "s"}`}
+	const release = (
+		<Flex
+			columnGap={{ default: "columnGapSm" }}
+			flexWrap={{ default: "nowrap" }}
+			alignItems={{ default: "alignItemsCenter" }}
+		>
+			<span style={nowrap}>
+				<Link to={releasePath(r.name)} style={{ fontWeight: 600 }}>
+					{formatReleaseName(r.name)}
+				</Link>
+				{/* What blocks it, for screen readers only: no visible verdict. */}
+				<span role="status" className="pf-v6-screen-reader">
+					{blockerCount > 0 &&
+						`${formatReleaseName(r.name)}: ${blockerCount} blocker${blockerCount === 1 ? "" : "s"}`}
+				</span>
 			</span>
-		</>
+			{/* A shipped version's icon is its date's check. */}
+			{!shipped && (
+				<CandidateIcon ov={ov} data={candidate.data} error={candidate.error} />
+			)}
+		</Flex>
 	);
-	const targetDate = (
-		<span style={{ whiteSpace: "nowrap" }}>
-			{dueDate?.date ?? <span style={muted}>TBD</span>}
-			{flag && <Flag text={flag} />}
-		</span>
+	const date = (
+		<ShipDate
+			target={r.due_date ?? r.release_date}
+			shipped={shipped}
+			shippedAt={ov.shipped_at}
+		/>
 	);
-	const candidateCell = (
-		<CandidateCell ov={ov} data={candidate.data} error={candidate.error} />
-	);
-	const shipment = ov.shipment_mr && <ShipmentLink mr={ov.shipment_mr} />;
 	const ticketLink = ticket && (
 		<ExtLink
 			href={jiraIssueUrl(
@@ -256,41 +252,104 @@ function ReleaseRow({ ov, narrow }: { ov: ReleaseOverview; narrow: boolean }) {
 			<Tr>
 				<Td dataLabel="Release">
 					<Flex
-						columnGap={{ default: "columnGapMd" }}
+						justifyContent={{ default: "justifyContentSpaceBetween" }}
+						alignItems={{ default: "alignItemsCenter" }}
 						flexWrap={{ default: "nowrap" }}
-						alignItems={{ default: "alignItemsBaseline" }}
+						columnGap={{ default: "columnGapMd" }}
 					>
-						<span style={{ whiteSpace: "nowrap" }}>{name}</span>
-						<span style={{ minWidth: 0 }}>{candidateCell}</span>
+						{release}
+						{date}
 					</Flex>
 					<Flex
 						columnGap={{ default: "columnGapMd" }}
-						rowGap={{ default: "rowGapXs" }}
 						alignItems={{ default: "alignItemsCenter" }}
 						style={{
 							fontSize: "var(--pf-t--global--font--size--sm)",
 							marginTop: "0.25rem",
 						}}
 					>
-						{targetDate}
-						<span style={{ whiteSpace: "nowrap" }}>
+						<span style={nowrap}>
 							{ticketLink || <span style={muted}>No ticket</span>}
 						</span>
-						<span style={{ whiteSpace: "nowrap" }}>{assignee}</span>
-						{shipment}
+						<span style={nowrap}>{assignee}</span>
 					</Flex>
 				</Td>
 			</Tr>
 		);
 	return (
 		<Tr>
-			<Td dataLabel="Release">{name}</Td>
-			<Td dataLabel="Target">{targetDate}</Td>
-			<Td dataLabel="Release candidate">{candidateCell}</Td>
-			<Td dataLabel="Shipment">{shipment || dash}</Td>
+			<Td dataLabel="Release">{release}</Td>
+			<Td dataLabel="Ship date">{date}</Td>
 			<Td dataLabel="Ticket">{ticketLink || dash}</Td>
 			<Td dataLabel="Assignee">{assignee}</Td>
 		</Tr>
+	);
+}
+
+const exact = (iso: string) =>
+	`${new Date(iso).toLocaleString("en-US", {
+		timeZone: "UTC",
+		month: "short",
+		day: "numeric",
+		year: "numeric",
+		hour: "2-digit",
+		minute: "2-digit",
+		hourCycle: "h23",
+	})} UTC`;
+
+/**
+ * Unshipped, the target date with its due flag; shipped, a check and the
+ * day the catalog first published it, the exact time in its tooltip.
+ */
+function ShipDate({
+	target,
+	shipped,
+	shippedAt,
+}: {
+	target?: string;
+	shipped: boolean;
+	shippedAt?: string;
+}) {
+	if (shipped)
+		return (
+			<Tooltip
+				content={
+					shippedAt
+						? `Published to the Red Hat catalog ${exact(shippedAt)}`
+						: "Shipped"
+				}
+			>
+				<span
+					// biome-ignore lint/a11y/noNoninteractiveTabindex: focus shows its tooltip.
+					tabIndex={0}
+					style={{
+						...nowrap,
+						display: "inline-flex",
+						gap: "0.375rem",
+						alignItems: "center",
+					}}
+				>
+					<Icon status="success" isInline>
+						<CheckCircleIcon />
+					</Icon>
+					{shippedAt ? `Shipped ${day(shippedAt)}` : "Shipped"}
+				</span>
+			</Tooltip>
+		);
+	const d = target ? due(target, false) : undefined;
+	const flag =
+		d?.kind === "past"
+			? "Past due"
+			: d?.kind === "soon"
+				? d.days === 0
+					? "Due today"
+					: `Due in ${days(d.days)}`
+				: null;
+	return (
+		<span style={nowrap}>
+			{d?.date ?? <span style={muted}>TBD</span>}
+			{flag && <Flag text={flag} />}
+		</span>
 	);
 }
 
@@ -337,17 +396,20 @@ const toneIcons: Record<Tone, ReactNode> = {
 	),
 };
 
-// The icon's tone in words: the link's text is all a screen reader gets.
-const severityWords: Partial<Record<Tone, string>> = {
-	danger: "Blocked: ",
-	warning: "Warning: ",
+const toneWords: Record<Tone, string> = {
+	danger: "Blocked",
+	warning: "Warning",
+	info: "Note",
+	running: "Running",
+	success: "Ready",
 };
 
 /**
- * The candidate as one icon and a few words linking the release page: its
- * first blocker or warning and who owns it, else how many of its FBCs are green.
+ * The candidate as one icon after the version: its words, the first blocker
+ * or warning and its owner, or how many FBCs are green, in the tooltip and
+ * accessible name. No FBC expected or built is a grey dash.
  */
-function CandidateCell({
+function CandidateIcon({
 	ov,
 	data,
 	error,
@@ -364,70 +426,48 @@ function CandidateCell({
 			<Spinner size="sm" aria-label="Loading the release candidate" />
 		);
 	const fbc = data.fbc_candidate;
+	let icon: ReactNode;
+	let tip: string;
 	if (!fbc) {
-		const [label, tip] =
+		tip =
 			data.reason === "not a concrete quay-vX.Y.Z version"
-				? ["Not expected", "Only Quay versions have FBC builds"]
-				: data.shipped
-					? ["No FBC data", "No FBC data: this version has shipped"]
-					: ["No FBCs yet", "No FBCs yet: ART has not built one"];
-		return (
-			<Tooltip content={tip}>
-				{/* biome-ignore lint/a11y/noNoninteractiveTabindex: focus shows its tooltip. */}
-				<span tabIndex={0} style={muted}>
-					<span aria-hidden="true">–</span>
-					<span className="pf-v6-screen-reader">{label}</span>
-				</span>
-			</Tooltip>
+				? "Not expected: only Quay versions have FBC builds"
+				: "No FBCs yet: ART has not built one";
+		icon = <span aria-hidden="true">–</span>;
+	} else {
+		const staged = fbc.source !== "stream";
+		const cells = fbcGroups(data).flatMap((g) =>
+			g.rows.map((row) => {
+				const stream = row.fbc ? null : streamFbc(data.fbc_stream, row);
+				return { row, stream, problem: cellProblem(row, staged, stream) };
+			}),
 		);
+		const bs = blockers(
+			data,
+			ov.release.name,
+			ov.release.konflux_application ?? "",
+			config,
+		);
+		const s = candidateSummary(cells, bs);
+		// Who acts on the gap the words name: the first blocker's, else warning's, owner.
+		const owner = (
+			bs.find((b) => b.level === "blocker") ??
+			bs.find((b) => b.level === "warning")
+		)?.owner;
+		tip = `${toneWords[s.tone]}: ${s.all}${owner ? ` · ${owner}` : ""}`;
+		icon = toneIcons[s.tone];
 	}
-	const staged = fbc.source !== "stream";
-	const cells = fbcGroups(data).flatMap((g) =>
-		g.rows.map((row) => {
-			const stream = row.fbc ? null : streamFbc(data.fbc_stream, row);
-			return { row, stream, problem: cellProblem(row, staged, stream) };
-		}),
-	);
-	const bs = blockers(
-		data,
-		ov.release.name,
-		ov.release.konflux_application ?? "",
-		config,
-	);
-	const s = candidateSummary(cells, bs);
-	// Who acts on the gap the words name: the first blocker's, else warning's, owner.
-	const owner = (
-		bs.find((b) => b.level === "blocker") ??
-		bs.find((b) => b.level === "warning")
-	)?.owner;
 	return (
-		<span
-			style={{
-				display: "inline-flex",
-				flexWrap: "wrap",
-				columnGap: "0.5rem",
-				alignItems: "center",
-			}}
-		>
-			{toneIcons[s.tone]}
-			<Tooltip content={s.all}>
-				<Link to={releasePath(ov.release.name)}>
-					{severityWords[s.tone] && (
-						<span className="pf-v6-screen-reader">{severityWords[s.tone]}</span>
-					)}
-					{s.words}
-					{s.more && (
-						<span style={{ whiteSpace: "nowrap" }}>{`\u00a0${s.more}`}</span>
-					)}
-				</Link>
-			</Tooltip>
-			{owner && (
-				<span style={muted}>
-					<span aria-hidden="true">· </span>
-					<span className="pf-v6-screen-reader">Owner: </span>
-					{owner}
-				</span>
-			)}
-		</span>
+		<Tooltip content={tip}>
+			<span
+				// biome-ignore lint/a11y/noNoninteractiveTabindex: focus shows its tooltip.
+				tabIndex={0}
+				aria-label={tip}
+				role="img"
+				style={{ ...(fbc ? {} : muted), display: "inline-flex" }}
+			>
+				{icon}
+			</span>
+		</Tooltip>
 	);
 }

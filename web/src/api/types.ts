@@ -296,6 +296,8 @@ export interface ReleaseOverview {
 	issue_summary?: IssueSummary;
 	readiness: ReadinessResponse;
 	latest_build?: string;
+	/** When the Red Hat catalog first published the version. */
+	shipped_at?: string;
 	next_in_stream: boolean;
 	shipment_mr: ShipmentMR | null;
 }

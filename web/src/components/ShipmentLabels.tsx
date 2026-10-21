@@ -1,14 +1,12 @@
 import {
 	HelperText,
 	HelperTextItem,
-	Icon,
 	Label,
 	type LabelProps,
 } from "@patternfly/react-core";
-import { CheckCircleIcon, InfoCircleIcon } from "@patternfly/react-icons";
 import type { ShipmentMR } from "../api/types";
 import { shipmentFlags, shipmentLabel } from "../utils/shipment";
-import { external, muted } from "./OperatorImages";
+import { external } from "./OperatorImages";
 
 /** A Label render prop that makes the label a link to the shipment MR. */
 export function mrLink(mr: ShipmentMR, title?: string): LabelProps["render"] {
@@ -40,28 +38,5 @@ export function ShipmentLabels({ mr }: { mr: ShipmentMR }) {
 				</HelperText>
 			)}
 		</>
-	);
-}
-
-/** The shipment MR's state as its icon and a link naming it, no filled label. */
-export function ShipmentLink({ mr }: { mr: ShipmentMR }) {
-	const label = shipmentLabel(mr);
-	const flags = shipmentFlags(mr);
-	return (
-		<span
-			style={{ display: "inline-flex", gap: "0.5rem", alignItems: "center" }}
-		>
-			<Icon status={label.status} isInline>
-				{label.status === "success" ? <CheckCircleIcon /> : <InfoCircleIcon />}
-			</Icon>
-			<span>
-				<a href={mr.web_url} title={label.tooltip} {...external}>
-					{label.text.replace(/^Shipment MR:? ?/, "MR ")}
-				</a>
-				{flags.length > 0 && (
-					<span style={muted}>{` · ${flags.join(" · ")}`}</span>
-				)}
-			</span>
-		</span>
 	);
 }
