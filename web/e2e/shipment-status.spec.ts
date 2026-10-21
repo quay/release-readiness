@@ -21,7 +21,7 @@ const candidate = {
 	reading: { read: 0, failed: 0, pending: 0, history_days: 0 },
 };
 
-async function mockDashboard(
+async function mockRelease(
 	page: Page,
 	mr: { state: "opened" | "merged"; stage: "prod_released" | "shipped" },
 ) {
@@ -29,43 +29,46 @@ async function mockDashboard(
 	await page.route("**/api/v1/sync-status", (route) =>
 		route.fulfill({ json: { problems: [], sources: [] } }),
 	);
-	await page.route("**/api/v1/releases/overview", (route) =>
+	await page.route(`**/api/v1/releases/${version}`, (route) =>
 		route.fulfill({
-			json: [
-				{
-					release: { name: version, released: true },
-					readiness: { signal: "green", message: "Released" },
-					next_in_stream: true,
-					shipment_mr: {
-						iid: 948,
-						web_url: mrURL,
-						state: mr.state,
-						draft: false,
-						stage: mr.stage,
-						pipeline_failed: false,
-						needs_approval: false,
-						source: "pointer",
-					},
+			json: {
+				name: version,
+				released: true,
+				shipment_mr: {
+					iid: 948,
+					web_url: mrURL,
+					state: mr.state,
+					draft: false,
+					stage: mr.stage,
+					pipeline_failed: false,
+					needs_approval: false,
+					source: "pointer",
 				},
-			],
+			},
 		}),
+	);
+	await page.route(`**/api/v1/releases/${version}/issues`, (route) =>
+		route.fulfill({ json: [] }),
 	);
 	await page.route(`**/api/v1/releases/${version}/candidate`, (route) =>
 		route.fulfill({ json: candidate }),
+	);
+	await page.route(`**/api/v1/releases/${version}/ci`, (route) =>
+		route.fulfill({ json: [] }),
 	);
 }
 
 test("shows an open shipment MR as unshipped even after the version releases", async ({
 	page,
 }, testInfo) => {
-	await mockDashboard(page, { state: "opened", stage: "prod_released" });
+	await mockRelease(page, { state: "opened", stage: "prod_released" });
 
-	await page.goto("/");
+	await page.goto(`/releases/${version}`);
 
 	const shipment = page.locator(`a[href="${mrURL}"]`);
-	await expect(shipment).toHaveText("MR open");
+	await expect(shipment).toHaveText("Shipment MR open");
 	await expect(page.getByText("Production release succeeded")).toHaveCount(0);
-	await expect(shipment).not.toHaveText("MR shipped");
+	await expect(shipment).not.toHaveText("Shipment MR: shipped");
 	await expect(page.getByText("Shipment MR: shipped", { exact: true })).toHaveCount(
 		0,
 	);
@@ -76,11 +79,11 @@ test("shows an open shipment MR as unshipped even after the version releases", a
 });
 
 test("shows a shipment MR as shipped after it merges", async ({ page }, testInfo) => {
-	await mockDashboard(page, { state: "merged", stage: "shipped" });
+	await mockRelease(page, { state: "merged", stage: "shipped" });
 
-	await page.goto("/");
+	await page.goto(`/releases/${version}`);
 
-	await expect(page.locator(`a[href="${mrURL}"]`)).toHaveText("MR shipped");
+	await expect(page.locator(`a[href="${mrURL}"]`)).toHaveText("Shipment MR: shipped");
 	await page.screenshot({
 		path: testInfo.outputPath("merged-shipment-mr.png"),
 		fullPage: true,
