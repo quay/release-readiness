@@ -5,8 +5,8 @@ go 1.27.0
 toolchain go1.27.3
 
 require (
-	k8s.io/apimachinery v0.38.0-alpha.2
-	k8s.io/client-go v0.38.0-alpha.2
+	k8s.io/apimachinery v0.38.0-alpha.3
+	k8s.io/client-go v0.38.0-alpha.3
 	modernc.org/sqlite v1.60.1
 	sigs.k8s.io/yaml v1.6.0
 )
