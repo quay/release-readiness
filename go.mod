@@ -2,7 +2,7 @@ module github.com/quay/release-readiness
 
 go 1.27.0
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	k8s.io/apimachinery v0.38.0-beta.0
