@@ -1,9 +1,24 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "automerge": false,
+  "automergeType": "pr",
+  "platformAutomerge": false,
+  "lockFileMaintenance": {"automerge": false},
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {"minimumReleaseAge": null},
   "packageRules": [
     {
-      "description": "Automerge non-major updates",
-      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest", "lockFileMaintenance"],
+      "description": "Automerge non-major vulnerability fixes",
+      "matchJsonata": ["isVulnerabilityAlert = true"],
+      "matchUpdateTypes": ["patch", "minor"],
+      "automerge": true
+    },
+    {
+      "description": "Automerge Red Hat base image digest and build bumps",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["registry.access.redhat.com/**", "registry.redhat.io/**"],
+      "matchUpdateTypes": ["digest", "pin", "pinDigest", "patch"],
+      "minimumReleaseAge": "1 day",
       "automerge": true
     },
     {
