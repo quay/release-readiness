@@ -60,20 +60,6 @@ const NIGHTLY = /-nightly(?=-|$)/;
 export const jobShortName = (job: string) =>
 	job.match(/e2e-install-(.+)$/)?.[1].replace(NIGHTLY, "") ?? job;
 
-/**
- * A job's name after "redhat-X.Y-" less "e2e-install-" and "-nightly":
- * aws-ocp422-aws-s3. Other jobs get their short name.
- */
-export const jobLabel = (job: string) =>
-	job
-		.match(/redhat-\d+\.\d+-(.+)$/)?.[1]
-		.replace("e2e-install-", "")
-		.replace(NIGHTLY, "") ?? jobShortName(job);
-
-export const jobLabels = (jobs: string[]) => jobs.map(jobLabel);
-
-const failedState = (s: string) => s === "failure" || s === "error";
-
 /** Each FBC of a slot, on the head bundle or not, of every operator. */
 const slotFBCs = (c: FBCCandidate) =>
 	c.operators.flatMap((o) => [...o.members, ...o.conflicts]);
@@ -95,15 +81,6 @@ export function fbcsBuilt(c: FBCCandidate): string {
 
 /** Whether an operator has an FBC, on the head bundle or not. */
 const hasFBC = (o: OperatorFBC) => o.members.length + o.conflicts.length > 0;
-
-/**
- * release-from-fbc's fbc-pullspecs, comma-separated, only for a complete
- * candidate; else null.
- */
-export const fbcPullspecs = (c: FBCCandidate): string | null =>
-	c.state === "complete" && c.pullspecs.length > 0
-		? c.pullspecs.join(",")
-		: null;
 
 /** Why a release candidate cannot yet offer FBC pullspecs. */
 export const fbcPullspecsReason = (
@@ -412,12 +389,6 @@ function fbcStage(r: KonfluxRelease): StatusLine {
 	};
 }
 
-/** Whether a row has something to act on: a failed stage, a flag or a failed run. */
-export const needsAttention = (r: FbcRow) =>
-	r.stage?.status === "failed" ||
-	r.flags.length > 0 ||
-	r.runs.some((p) => failedState(p.state));
-
 const MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(" ");
 
 /**
@@ -527,18 +498,10 @@ export function verdictLine(v: Verdict): StatusLine {
 	}
 }
 
-/**
- * How far the render sync has read FBC images and the backfill ART build
- * history, null with nothing pending or failed: in progress while either is,
- * a warning for failed reads only once neither is.
- */
+/** Current FBC reads only; historical backfill is separate non-blocking text. */
 export function readingLine(r: ReadProgress): StatusLine | null {
 	const total = r.read + r.failed + r.pending;
-	const reading = [
-		r.pending > 0 && `FBCs ${r.read}/${total}`,
-		r.history_days > 0 &&
-			`build history, ${r.history_days} day${r.history_days === 1 ? "" : "s"} left`,
-	].filter(Boolean);
+	const reading = [r.pending > 0 && `FBCs ${r.read}/${total}`].filter(Boolean);
 	if (reading.length === 0)
 		return r.failed
 			? {
@@ -924,6 +887,9 @@ export const worst = (r: ReleaseImage) => Math.min(3, ...r.issues.map(rank));
 
 // Sync source ids as the page names them.
 export const SOURCE_NAMES: Record<string, string> = {
+	"prow-inventory": "CI job configuration",
+	"prow-history": "Historical CI",
+	"art-backfill": "ART historical backfill",
 	konflux: "Konflux releases",
 	"art-builds": "ART builds",
 	"art-history": "ART build history",
@@ -937,8 +903,13 @@ export const SOURCE_NAMES: Record<string, string> = {
 	retention: "Retention",
 };
 
-// Sources no page reads: the daily prune and the FBC Jira writer.
-const NON_DATA = new Set(["retention", "reconcile"]);
+// Maintenance and separately paced history do not date foreground freshness.
+const NON_DATA = new Set([
+	"retention",
+	"reconcile",
+	"art-backfill",
+	"prow-history",
+]);
 
 /**
  * How current the page's data is: when the least recent data source not

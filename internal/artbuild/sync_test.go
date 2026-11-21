@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -43,7 +44,9 @@ type fakeART struct {
 	// reads counts /build requests.
 	reads int
 	// failNVR is an NVR whose /search fails.
-	failNVR string
+	failNVR  string
+	failDate string
+	slowDate string
 }
 
 func pullspec(nvr string) string {
@@ -71,6 +74,14 @@ func (f *fakeART) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/search":
 		f.searches = append(f.searches, q)
+		if f.slowDate != "" && q.Get("dateRange") == f.slowDate {
+			<-r.Context().Done()
+			return
+		}
+		if f.failDate != "" && q.Get("dateRange") == f.failDate {
+			http.Error(w, "history unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		if f.failNVR != "" && q.Get("nvr") == f.failNVR {
 			http.Error(w, "unavailable", http.StatusServiceUnavailable)
 			return
@@ -104,6 +115,10 @@ func (f *fakeART) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type fakeHistoryStore struct {
+	// apps is the application list discovery reads; nil means no snapshots
+	// are stored. appsErr makes that read fail.
+	apps    []string
+	appsErr error
 	builds  []HistoryBuild
 	scanned []string
 	// sources maps a record ID to its name and source repo.
@@ -111,7 +126,7 @@ type fakeHistoryStore struct {
 }
 
 func (s *fakeHistoryStore) ListSnapshotApplications(context.Context) ([]string, error) {
-	return []string{"fbc-quay-3-17", "quay-images-base"}, nil
+	return s.apps, s.appsErr
 }
 
 func (s *fakeHistoryStore) ScannedArtHistoryDays(_ context.Context, group, buildType string) ([]string, error) {
@@ -203,6 +218,7 @@ func syncWith(t *testing.T, f *fakeART) (*HistorySync, *fakeHistoryStore) {
 	t.Cleanup(srv.Close)
 	store := &fakeHistoryStore{}
 	h := NewHistorySync(NewClient(srv.URL, srv.Client()), store, slog.Default())
+	h.Groups = []string{"quay-3.17"}
 	h.pace.Reset(time.Millisecond)
 	h.now = func() time.Time { return time.Date(2026, 10, 12, 18, 0, 0, 0, time.UTC) }
 	return h, store
@@ -298,6 +314,70 @@ func TestHistorySyncSkipsPending(t *testing.T) {
 		if !strings.HasPrefix(b.RecordID, "ok-") {
 			t.Errorf("stored %s record %s, want only successful records", b.NVR, b.RecordID)
 		}
+	}
+}
+
+// The union of configured and discovered groups drives the pass: the
+// applications quay-3-18 and fbc-quay-3-17 add quay-3.18 to the configured
+// quay-3.17, deduped, and applications naming no quay stream are ignored.
+func TestHistorySyncUnionsConfiguredAndDiscoveredGroups(t *testing.T) {
+	f := &fakeART{}
+	h, store := syncWith(t, f) // Groups: quay-3.17
+	store.apps = []string{"quay-3-18", "fbc-quay-3-17", "quay-images-base", "something-else"}
+	h.SyncOnce(t.Context())
+	var groups []string
+	for _, q := range f.searches {
+		if !slices.Contains(groups, q.Get("group")) {
+			groups = append(groups, q.Get("group"))
+		}
+	}
+	want := []string{"quay-3.17", "quay-3.18"}
+	if !slices.Equal(groups, want) {
+		t.Errorf("scanned groups %q, want %q", groups, want)
+	}
+	for _, g := range want {
+		if !slices.Contains(store.scanned, g+" fbc "+testDay) {
+			t.Errorf("scanned %q, want %s of %s marked", store.scanned, g, testDay)
+		}
+	}
+}
+
+// A discovery failure with configured groups is only logged: the pass scans
+// them and reports success, so a Konflux outage cannot stop ART history.
+func TestHistorySyncDiscoveryFailureKeepsConfiguredGroups(t *testing.T) {
+	f := quayART()
+	f.days["fbc$"] = f.days["^quay-operator-fbc$"]
+	h, store := syncWith(t, f)
+	store.appsErr = errors.New("snapshot table unavailable")
+	status := syncstatus.New()
+	h.Status = status.Track("art-history", time.Minute)
+	h.SyncOnce(t.Context())
+	if p := status.Problems(time.Now()); len(p) != 0 {
+		t.Errorf("sync status: %+v, want none", p)
+	}
+	if got, want := store.stored(), sorted("bundle "+qoBundle, "fbc "+qoFBC, "image "+qoImage, "image "+clairImage); !slices.Equal(got, want) {
+		t.Errorf("stored:\n got %q\nwant %q", got, want)
+	}
+	if !slices.Contains(store.scanned, "quay-3.17 fbc "+testDay) {
+		t.Errorf("scanned %q, want %s marked", store.scanned, testDay)
+	}
+}
+
+// With nothing configured, a discovery failure is the pass's error, not a
+// silent success.
+func TestHistorySyncDiscoveryFailureWithoutConfiguredGroups(t *testing.T) {
+	f := &fakeART{}
+	h, store := syncWith(t, f)
+	h.Groups = nil
+	store.appsErr = errors.New("snapshot table unavailable")
+	status := syncstatus.New()
+	h.Status = status.Track("art-history", time.Minute)
+	h.SyncOnce(t.Context())
+	if p := status.Problems(time.Now()); len(p) != 1 || !strings.Contains(p[0].Message, "snapshot table unavailable") {
+		t.Errorf("sync status: %+v, want the discovery failure", p)
+	}
+	if len(f.searches) != 0 {
+		t.Errorf("searched %q with no groups, want none", f.searches)
 	}
 }
 

@@ -151,7 +151,27 @@ func (c *Client) get(ctx context.Context, u string, gitlab bool) ([]byte, error)
 	if gitlab && c.token != "" {
 		req.Header.Set("PRIVATE-TOKEN", c.token)
 	}
-	resp, err := c.http.Do(req)
+	client := c.http
+	if gitlab && c.token != "" {
+		// PRIVATE-TOKEN is a custom header: net/http does not strip it
+		// automatically on redirects. Keep it on the exact origin only.
+		copy := *c.http
+		previous := copy.CheckRedirect
+		copy.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+			if next.URL.Scheme != req.URL.Scheme || next.URL.Host != req.URL.Host {
+				return fmt.Errorf("refusing authenticated GitLab redirect outside configured origin")
+			}
+			if previous != nil {
+				return previous(next, via)
+			}
+			if len(via) >= 10 {
+				return fmt.Errorf("too many GitLab redirects")
+			}
+			return nil
+		}
+		client = &copy
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -162,5 +182,10 @@ func (c *Client) get(ctx context.Context, u string, gitlab bool) ([]byte, error)
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GET %s: %s", u, resp.Status)
 	}
-	return io.ReadAll(resp.Body)
+	const responseLimit = 16 << 20
+	body, err := io.ReadAll(io.LimitReader(resp.Body, responseLimit+1))
+	if len(body) > responseLimit {
+		return nil, fmt.Errorf("shipment response exceeds 16 MiB")
+	}
+	return body, err
 }

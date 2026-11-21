@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/quay/release-readiness/internal/syncstatus"
+	"github.com/quay/release-readiness/internal/workpool"
 )
 
 const (
@@ -68,11 +69,12 @@ type Resolver struct {
 	logger *slog.Logger
 	gap    time.Duration
 	// Status receives each pass's outcome; nil reports nowhere.
-	Status *syncstatus.Source
+	Status  *syncstatus.Source
+	Workers int
 }
 
 func NewResolver(client *Client, store Store, logger *slog.Logger) *Resolver {
-	return &Resolver{client: client, store: store, logger: logger, gap: time.Second}
+	return &Resolver{client: client, store: store, logger: logger, gap: time.Second, Workers: 2}
 }
 
 // Run resolves a pass immediately and then every interval until ctx is cancelled.
@@ -106,25 +108,22 @@ func (r *Resolver) ResolveOnce(ctx context.Context) {
 	pace := time.NewTicker(r.gap)
 	defer pace.Stop()
 	resolved := 0
-	for _, c := range cands {
+	pass.Add(workpool.Run(ctx, cands, r.Workers, func(ctx context.Context, c Candidate) (Build, error) {
 		b, err := r.resolve(ctx, c, now, pace.C)
 		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			r.logger.Warn("lookup", "image", c.Image, "error", err)
-			pass.Add(fmt.Errorf("lookup %s: %w", c.Image, err))
-			continue
+			return b, fmt.Errorf("resolve %s: %w", c.Image, err)
 		}
+		return b, nil
+	}, func(c Candidate, b Build) error {
 		if err := r.store.UpsertArtBuild(ctx, b); err != nil {
-			r.logger.Error("store", "image", c.Image, "error", err)
-			pass.Add(fmt.Errorf("store %s: %w", c.Image, err))
-			continue
+			return fmt.Errorf("store %s: %w", c.Image, err)
 		}
 		if b.State == StateResolved {
 			resolved++
 		}
-	}
+		return nil
+	}))
+
 	if len(cands) > 0 {
 		r.logger.Info("resolved images", "looked_up", len(cands), "resolved", resolved)
 	}

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -82,6 +83,13 @@ type versionStore struct {
 
 func (v *versionStore) UpsertReleaseVersion(_ context.Context, rv *model.ReleaseVersion) error {
 	v.upserted = append(v.upserted, *rv)
+	for i := range v.versions {
+		if v.versions[i].Name == rv.Name {
+			v.versions[i] = *rv
+			return nil
+		}
+	}
+	v.versions = append(v.versions, *rv)
 	return nil
 }
 
@@ -129,6 +137,8 @@ func TestSyncOnceSyncsShippedUnarchivedVersions(t *testing.T) {
 
 	s.SyncOnce(context.Background())
 
+	// Worker completion order is unspecified; all retained versions must sync.
+	slices.Sort(store.synced)
 	if got := strings.Join(store.synced, ","); got != "quay-v3.17.4,quay-v3.17.5" {
 		t.Errorf("synced = %s, want the retained versions", got)
 	}
@@ -277,4 +287,95 @@ func TestSyncOnceKeepsStoredFlagsWhenVersionsFail(t *testing.T) {
 	versions = []VersionField{{Name: "quay-v3.17.5", Released: true, Archived: true, ReleaseDate: "2026-10-21"}}
 	s.SyncOnce(ctx)
 	check("pass 3", true, true, "2026-10-21", false)
+}
+
+func TestSyncOnceBackfillsReleasedVersions(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jql := r.URL.Query().Get("jql")
+		switch {
+		case strings.Contains(jql, "status IN (Closed, Done)"):
+			_ = json.NewEncoder(w).Encode(searchResponse{Issues: []Issue{
+				{Key: "PROJQUAY-12788", Fields: IssueFields{Summary: "Release Quay v3.18.3"}},
+				{Key: "PROJQUAY-12784", Fields: IssueFields{Summary: "Release Quay v3.17.6"}},
+			}})
+		case strings.Contains(jql, "-area/release"):
+			_ = json.NewEncoder(w).Encode(searchResponse{})
+		case r.URL.Path == "/rest/api/3/project/PROJQUAY/versions":
+			_ = json.NewEncoder(w).Encode([]VersionField{
+				{Name: "quay-v3.18.3", Released: false},
+			})
+		default:
+			_ = json.NewEncoder(w).Encode(searchResponse{})
+		}
+	}))
+	defer srv.Close()
+
+	client := New(Config{BaseURL: srv.URL, Token: "t", Project: "PROJQUAY"})
+	client.minDelay = 0
+	store := &versionStore{}
+	withTx := func(ctx context.Context, fn func(Store) error) error { return fn(store) }
+	s := NewSyncer(client, store, withTx, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	s.SyncOnce(context.Background())
+
+	got := map[string]model.ReleaseVersion{}
+	for _, rv := range store.upserted {
+		got[rv.Name] = rv
+	}
+	// The closed ticket releases the version even when the project list
+	// leaves it unreleased.
+	if rv := got["quay-v3.18.3"]; !rv.Released || rv.ReleaseTicketKey != "PROJQUAY-12788" {
+		t.Errorf("quay-v3.18.3 = %+v, want released with its ticket", rv)
+	}
+	// A closed ticket is the evidence when the project list lacks the version.
+	if rv := got["quay-v3.17.6"]; !rv.Released || rv.ReleaseTicketKey != "PROJQUAY-12784" {
+		t.Errorf("quay-v3.17.6 = %+v, want released with its ticket", rv)
+	}
+	// Both feed the reconciliation's issue syncing.
+	slices.Sort(store.synced)
+	if got := strings.Join(store.synced, ","); got != "quay-v3.17.6,quay-v3.18.3" {
+		t.Errorf("synced = %s, want both backfilled versions", got)
+	}
+}
+
+func TestSyncOnceNeverUnreleases(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jql := r.URL.Query().Get("jql")
+		switch {
+		case strings.Contains(jql, "status IN (Closed, Done)"):
+			_ = json.NewEncoder(w).Encode(searchResponse{Issues: []Issue{
+				{Key: "PROJQUAY-12788", Fields: IssueFields{Summary: "Release Quay v3.18.3"}},
+			}})
+		case strings.Contains(jql, "-area/release"):
+			_ = json.NewEncoder(w).Encode(searchResponse{})
+		case r.URL.Path == "/rest/api/3/project/PROJQUAY/versions":
+			_ = json.NewEncoder(w).Encode([]VersionField{
+				{Name: "quay-v3.18.3"},
+			})
+		default:
+			_ = json.NewEncoder(w).Encode(searchResponse{})
+		}
+	}))
+	defer srv.Close()
+
+	client := New(Config{BaseURL: srv.URL, Token: "t", Project: "PROJQUAY"})
+	client.minDelay = 0
+	store := &versionStore{}
+	withTx := func(ctx context.Context, fn func(Store) error) error { return fn(store) }
+	s := NewSyncer(client, store, withTx, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	// A first pass releases 3.18.3 by its closed ticket; the stored flag
+	// must survive later passes where the list still says unreleased.
+	for range 2 {
+		s.SyncOnce(context.Background())
+	}
+	var released bool
+	for _, rv := range store.versions {
+		if rv.Name == "quay-v3.18.3" {
+			released = rv.Released
+		}
+	}
+	if !released {
+		t.Error("quay-v3.18.3 unreleased after repeated passes; a release never un-happens")
+	}
 }

@@ -916,3 +916,18 @@ func ImageDigest(image string) string {
 	_, d, _ := strings.Cut(image, "@")
 	return d
 }
+
+// SelectedFBCs resolves the same candidate as the workbench without loading CI
+// runs. History pagination must not materialize the stream's entire run history.
+func (s *Selector) SelectedFBCs(ctx context.Context, rel *model.ReleaseVersion) (*model.FBCCandidate, error) {
+	c, err := s.SelectCandidate(ctx, rel)
+	if err != nil || c.Assembly == "" {
+		return nil, err
+	}
+	releases, err := s.db.StageReleases(ctx, rel, s.StageReleasePlanPattern)
+	if err != nil {
+		return nil, err
+	}
+	candidate, _, _, err := s.fbcCandidates(ctx, rel.KonfluxApplication, c, releases, nil)
+	return candidate, err
+}

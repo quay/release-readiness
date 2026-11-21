@@ -2,6 +2,7 @@ package prow
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"maps"
@@ -51,25 +52,15 @@ func runFixture(t *testing.T, job Job, id, file string) []byte {
 
 func testJobs(t *testing.T) []Job {
 	t.Helper()
-	jobs, err := ParseJobs(periodicJob + "=quay-3-18")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return jobs
+	return []Job{{Name: periodicJob, Prefix: "logs/" + periodicJob + "/", Application: "quay-3-18"}}
 }
 
-func TestParseJobs(t *testing.T) {
-	jobs := testJobs(t)
-	want := Job{Name: periodicJob, Prefix: "logs/" + periodicJob + "/", Application: "quay-3-18"}
-	if len(jobs) != 1 || jobs[0] != want {
-		t.Errorf("ParseJobs = %+v, want %+v", jobs, want)
-	}
-	if _, err := ParseJobs("no-release"); err == nil {
-		t.Error("ParseJobs without =application: want error")
-	}
-	if jobs, err := ParseJobs(""); err != nil || len(jobs) != 0 {
-		t.Errorf("ParseJobs(\"\") = %v, %v, want none", jobs, err)
-	}
+// testSyncer builds a Syncer walking exactly these jobs, without an
+// inventory: the in-package seam production never uses.
+func testSyncer(client *Client, store Store, jobs []Job, logger *slog.Logger) *Syncer {
+	s := NewSyncer(client, store, 15*time.Minute, logger)
+	s.jobs = jobs
+	return s
 }
 
 func TestParseRun(t *testing.T) {
@@ -261,7 +252,7 @@ func TestSync(t *testing.T) {
 	extra := map[string][]byte{}
 	srv, gets := fakeGCS(t, extra)
 	store := &memStore{runs: map[string]*Run{}}
-	s := NewSyncer(NewClient(srv.URL), store, testJobs(t), 15*time.Minute, slog.New(slog.DiscardHandler))
+	s := testSyncer(NewClient(srv.URL), store, testJobs(t), slog.New(slog.DiscardHandler))
 	reg := syncstatus.New()
 	s.Status = reg.Track("prow", 15*time.Minute)
 
@@ -308,7 +299,7 @@ func TestSync(t *testing.T) {
 		t.Errorf("problems after a failed olm-csvs.yaml read = %+v", p)
 	}
 	if r := store.runs[pendingRun]; r.ArtifactState != ArtifactMissing {
-		t.Errorf("run after a failed olm-csvs.yaml read = %+v, want it missing", r)
+		t.Errorf("run after a failed olm-csvs.yaml read = %+v, want its previous unread artifact state", r)
 	}
 
 	// Finished runs are not fetched again.
@@ -351,6 +342,12 @@ func TestSyncInstallFailed(t *testing.T) {
 		{desc: "install failed after the CSV", id: periodicRun, want: true, reads: 1, extra: map[string][]byte{
 			dir(periodicRun) + deploy: []byte(`{"timestamp":1789612696,"passed":false,"result":"FAILURE"}`),
 		}},
+		{desc: "legacy aws-s3 failed install", id: periodicRun, want: true, reads: 1, extra: map[string][]byte{
+			dir(periodicRun) + "prowjob.json":                                              []byte(`{"spec":{"pod_spec":{"containers":[{"args":["--target=aws-s3"]}]}},"status":{"state":"failure"}}`),
+			dir(periodicRun) + "finished.json":                                             []byte(`{"timestamp":1789612696,"result":"failure"}`),
+			dir(periodicRun) + "artifacts/aws-s3/quay-gather/artifacts/tested-images.json": runFixture(t, job, periodicRun, "artifacts/aws-s3-nightly/quay-gather/artifacts/tested-images.json"),
+			dir(periodicRun) + "artifacts/aws-s3/quay-deploy-aws-s3/finished.json":         []byte(`{"timestamp":1789612696,"result":"failure"}`),
+		}},
 		{desc: "installed, then failed", id: periodicRun, reads: 1},
 		{desc: "passed", id: installRun, extra: map[string][]byte{
 			dir(installRun) + "finished.json": []byte(`{"timestamp":1791602726,"passed":true,"result":"SUCCESS"}`),
@@ -366,7 +363,7 @@ func TestSyncInstallFailed(t *testing.T) {
 	} {
 		srv, gets := fakeGCS(t, tc.extra)
 		var log strings.Builder
-		s := NewSyncer(NewClient(srv.URL), nil, []Job{job}, 15*time.Minute, slog.New(slog.NewTextHandler(&log, nil)))
+		s := testSyncer(NewClient(srv.URL), nil, []Job{job}, slog.New(slog.NewTextHandler(&log, nil)))
 		r, err := s.fetchRun(t.Context(), job, tc.id)
 		if err != nil {
 			t.Fatalf("%s: %v", tc.desc, err)
@@ -388,7 +385,7 @@ func TestSyncInstallFailed(t *testing.T) {
 	// An unreadable step outcome fails the read, so the next pass reads the
 	// run again.
 	srv, _ := fakeGCS(t, map[string][]byte{dir(periodicRun) + deploy: nil})
-	s := NewSyncer(NewClient(srv.URL), nil, []Job{job}, 15*time.Minute, slog.New(slog.DiscardHandler))
+	s := testSyncer(NewClient(srv.URL), nil, []Job{job}, slog.New(slog.DiscardHandler))
 	if _, err := s.fetchRun(t.Context(), job, periodicRun); err == nil || !strings.Contains(err.Error(), "503") {
 		t.Errorf("unreadable step outcome: error %v, want a 503", err)
 	}
@@ -402,7 +399,7 @@ func TestSyncInvalidTestedImages(t *testing.T) {
 		run + "artifacts/aws-s3-nightly/quay-gather/artifacts/tested-images.json": []byte(`{"schema_version": 1, "images": [{"role": "quay",`),
 	})
 	store := &memStore{runs: map[string]*Run{}}
-	NewSyncer(NewClient(srv.URL), store, testJobs(t), 15*time.Minute, slog.New(slog.DiscardHandler)).SyncOnce(t.Context())
+	testSyncer(NewClient(srv.URL), store, testJobs(t), slog.New(slog.DiscardHandler)).SyncOnce(t.Context())
 	if r, n := store.runs[olmRun], gets[run+olmCSVs]; r == nil || r.ArtifactState != ArtifactInvalid || n != 0 {
 		t.Errorf("run = %+v after %d olm-csvs.yaml fetches, want invalid after none", r, n)
 	}
@@ -415,7 +412,7 @@ func TestSyncReportsFailedListing(t *testing.T) {
 	defer srv.Close()
 	jobs := append(testJobs(t), Job{Name: "other", Prefix: "logs/other/"})
 	reg := syncstatus.New()
-	s := NewSyncer(NewClient(srv.URL), &memStore{runs: map[string]*Run{}}, jobs, 15*time.Minute, slog.New(slog.DiscardHandler))
+	s := testSyncer(NewClient(srv.URL), &memStore{runs: map[string]*Run{}}, jobs, slog.New(slog.DiscardHandler))
 	s.Status = reg.Track("prow", 15*time.Minute)
 
 	s.SyncOnce(t.Context())
@@ -436,7 +433,7 @@ func TestSyncRetention(t *testing.T) {
 		"2107000000000000000": {JobName: periodicJob, BuildID: "2107000000000000000", StartedAt: &now},
 		"2099000000000000000": {JobName: periodicJob, BuildID: "2099000000000000000", StartedAt: &old},
 	}}
-	s := NewSyncer(NewClient(srv.URL), store, testJobs(t), 15*time.Minute, slog.New(slog.DiscardHandler))
+	s := testSyncer(NewClient(srv.URL), store, testJobs(t), slog.New(slog.DiscardHandler))
 	s.Retention = 24 * time.Hour
 
 	s.SyncOnce(t.Context())
@@ -448,80 +445,33 @@ func TestSyncRetention(t *testing.T) {
 	}
 }
 
-const (
-	jobPattern = `^periodic-ci-quay-quay-redhat-(?P<major>\d+)\.(?P<minor>\d+)-.+-nightly(-.+)?$`
-	jobListing = "logs/periodic-ci-quay-quay-redhat-"
-)
-
-func TestParseJobPattern(t *testing.T) {
-	p, err := ParseJobPattern(jobPattern)
-	if err != nil || p.prefix != "periodic-ci-quay-quay-redhat-" {
-		t.Errorf("ParseJobPattern = %+v, %v, want prefix periodic-ci-quay-quay-redhat-", p, err)
-	}
-	// The ^ anchors only the first branch, so no prefix starts every match.
-	if p, err := ParseJobPattern(`^periodic-a(?P<major>\d)(?P<minor>\d)|periodic-b`); err != nil || p.prefix != "" {
-		t.Errorf("ParseJobPattern(unanchored branch) = %+v, %v, want no prefix", p, err)
-	}
-	if _, err := ParseJobPattern(`^periodic-(?P<major>\d+)\.\d+-nightly$`); err == nil {
-		t.Error("pattern without minor: want error")
-	}
-	if _, err := ParseJobPattern(`(?P<major>`); err == nil {
-		t.Error("invalid pattern: want error")
-	}
-}
-
-// The pattern's matches join the configured jobs, which keep their
-// application.
-func TestDiscover(t *testing.T) {
-	srv, _ := fakeGCS(t, map[string][]byte{jobListing: []byte(`{"prefixes": [
-		"logs/` + periodicJob + `/",
-		"logs/periodic-ci-quay-quay-redhat-3.18-aws-arm64-ocp422-e2e-install-aws-s3-nightly-arm64/",
-		"logs/periodic-ci-quay-quay-redhat-5.0-aws-ocp50-e2e-install-aws-s3-nightly/",
-		"logs/periodic-ci-quay-quay-redhat-3.18-images/"]}`)})
-	p, err := ParseJobPattern(jobPattern)
-	if err != nil {
-		t.Fatal(err)
-	}
-	explicit := []Job{
-		{Name: periodicJob, Prefix: "logs/" + periodicJob + "/", Application: "quay-3-18-override"},
-		{Name: "other", Prefix: "logs/other/", Application: "quay-3-17"},
-	}
-	s := NewSyncer(NewClient(srv.URL), nil, explicit, 15*time.Minute, slog.New(slog.DiscardHandler))
-	s.Pattern = p
-
-	jobs, err := s.discover(t.Context())
-
-	arm := "periodic-ci-quay-quay-redhat-3.18-aws-arm64-ocp422-e2e-install-aws-s3-nightly-arm64"
-	five := "periodic-ci-quay-quay-redhat-5.0-aws-ocp50-e2e-install-aws-s3-nightly"
-	want := append(slices.Clone(explicit),
-		Job{Name: arm, Prefix: "logs/" + arm + "/", Application: "quay-3-18"},
-		Job{Name: five, Prefix: "logs/" + five + "/", Application: "quay-5-0"})
-	if err != nil || !slices.Equal(jobs, want) {
-		t.Errorf("discover = %+v, %v, want %+v", jobs, err, want)
-	}
-}
-
-// A failed job listing fails the pass; the configured jobs still sync.
+// A failed inventory read fails the pass; the direct jobs still sync.
 func TestSyncReportsFailedDiscovery(t *testing.T) {
-	srv, _ := fakeGCS(t, map[string][]byte{jobListing: nil})
-	p, err := ParseJobPattern(jobPattern)
-	if err != nil {
-		t.Fatal(err)
-	}
+	srv, _ := fakeGCS(t, map[string][]byte{})
 	store := &memStore{runs: map[string]*Run{}}
 	reg := syncstatus.New()
-	s := NewSyncer(NewClient(srv.URL), store, testJobs(t), 15*time.Minute, slog.New(slog.DiscardHandler))
+	s := testSyncer(NewClient(srv.URL), store, testJobs(t), slog.New(slog.DiscardHandler))
 	s.Status = reg.Track("prow", 15*time.Minute)
-	s.Pattern = p
+	s.Inventory = &failingInventory{}
 
 	s.SyncOnce(t.Context())
 
-	if p := reg.Problems(time.Now()); len(p) != 1 || !strings.Contains(p[0].Message, "discover jobs") || !strings.Contains(p[0].Message, "503") {
+	if p := reg.Problems(time.Now()); len(p) != 1 || !strings.Contains(p[0].Message, "discover jobs") {
 		t.Errorf("problems = %+v, want the failed discovery", p)
 	}
 	if len(store.runs) != 4 {
-		t.Errorf("runs = %d, want the configured job's 4", len(store.runs))
+		t.Errorf("runs = %d, want the job's 4", len(store.runs))
 	}
+}
+
+type failingInventory struct{}
+
+func (failingInventory) JobInventory(context.Context) ([]JobDefinition, string, error) {
+	return nil, "", errors.New("inventory unavailable")
+}
+
+func (failingInventory) SaveJobInventory(context.Context, []JobDefinition, string) error {
+	return nil
 }
 
 // A job with no stored runs is read newest first and stops at its first run
@@ -529,7 +479,7 @@ func TestSyncReportsFailedDiscovery(t *testing.T) {
 func TestSyncRetentionNoStoredRuns(t *testing.T) {
 	srv, gets := fakeGCS(t, nil)
 	store := &memStore{runs: map[string]*Run{}}
-	s := NewSyncer(NewClient(srv.URL), store, testJobs(t), 15*time.Minute, slog.New(slog.DiscardHandler))
+	s := testSyncer(NewClient(srv.URL), store, testJobs(t), slog.New(slog.DiscardHandler))
 	// Between noneRun's start, Oct 5, and olmRun's, Oct 9.
 	s.Retention = time.Since(time.Date(2026, 10, 7, 0, 0, 0, 0, time.UTC))
 
@@ -551,7 +501,7 @@ func TestSyncRetentionInterruptedWalk(t *testing.T) {
 	store := &memStore{runs: map[string]*Run{}}
 	retention := time.Since(time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC))
 	srv, _ := fakeGCS(t, map[string][]byte{"logs/" + periodicJob + "/" + noneRun + "/prowjob.json": nil})
-	s := NewSyncer(NewClient(srv.URL), store, testJobs(t), 15*time.Minute, slog.New(slog.DiscardHandler))
+	s := testSyncer(NewClient(srv.URL), store, testJobs(t), slog.New(slog.DiscardHandler))
 	s.Retention = retention
 
 	s.SyncOnce(t.Context())
@@ -560,12 +510,42 @@ func TestSyncRetentionInterruptedWalk(t *testing.T) {
 		t.Fatalf("stored runs after the interrupted walk = %v, want none", slices.Collect(maps.Keys(store.runs)))
 	}
 	srv, _ = fakeGCS(t, nil)
-	s = NewSyncer(NewClient(srv.URL), store, testJobs(t), 15*time.Minute, slog.New(slog.DiscardHandler))
+	s = testSyncer(NewClient(srv.URL), store, testJobs(t), slog.New(slog.DiscardHandler))
 	s.Retention = retention
 
 	s.SyncOnce(t.Context())
 
 	if len(store.runs) != 4 {
 		t.Errorf("stored runs after the next pass = %v, want all 4", slices.Collect(maps.Keys(store.runs)))
+	}
+}
+
+func TestApplyCompletion(t *testing.T) {
+	for _, tc := range []struct {
+		name, data, state string
+		valid             bool
+	}{
+		{"success", `{"timestamp":1700000000,"result":"SUCCESS"}`, "success", true},
+		{"failure", `{"timestamp":1700000000,"result":" failure "}`, "failure", true},
+		{"error", `{"timestamp":1700000000,"result":"Error"}`, "error", true},
+		{"aborted", `{"timestamp":1700000000,"result":"ABORTED"}`, "aborted", true},
+		{"unknown", `{"timestamp":1700000000,"result":"UNKNOWN","passed":true}`, "", false},
+		{"no timestamp", `{"result":"SUCCESS"}`, "", false},
+		{"negative timestamp", `{"timestamp":-1,"result":"SUCCESS"}`, "", false},
+		{"malformed", `{`, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run := Run{State: "running"}
+			err := run.applyCompletion([]byte(tc.data))
+			if !tc.valid {
+				if err == nil || run.State != "running" || run.CompletedAt != nil {
+					t.Fatalf("invalid record changed run: %+v, error: %v", run, err)
+				}
+				return
+			}
+			if err != nil || run.State != tc.state || run.CompletedAt == nil || run.CompletedAt.Unix() != 1700000000 {
+				t.Fatalf("incorrect completion: %+v, error: %v", run, err)
+			}
+		})
 	}
 }

@@ -1,0 +1,19 @@
+.git
+.env
+.env.*
+.codex
+.serena
+.agents
+tmp
+web/node_modules
+web/dist
+web/test-results
+web/playwright-report
+*.db
+*.db-*
+
+# Deployment credentials and generated Secret manifests
+deploy/.env
+deploy/.generated
+deploy/.prepare-*
+deploy/*.kubeconfig

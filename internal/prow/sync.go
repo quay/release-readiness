@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -69,6 +70,7 @@ func (c *Client) object(ctx context.Context, name string) ([]byte, error) {
 }
 
 func (c *Client) get(ctx context.Context, u string) ([]byte, error) {
+	countRequest(ctx, false)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
@@ -84,7 +86,11 @@ func (c *Client) get(ctx context.Context, u string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GET %s: %s", u, resp.Status)
 	}
-	return io.ReadAll(resp.Body)
+	b, err := io.ReadAll(io.LimitReader(resp.Body, (16<<20)+1))
+	if len(b) > 16<<20 {
+		return nil, fmt.Errorf("GCS response too large")
+	}
+	return b, err
 }
 
 // Store is the subset of the database layer the syncer needs.
@@ -94,10 +100,12 @@ type Store interface {
 	ListProwRunStarts(ctx context.Context, jobName string) ([]Run, error)
 }
 
-// Syncer polls configured job prefixes and upserts their runs.
+// Syncer polls discovered job prefixes and upserts their runs.
 type Syncer struct {
-	client   *Client
-	store    Store
+	client *Client
+	store  Store
+	// jobs is an in-package test seam: extra jobs beyond the inventory.
+	// Production always discovers jobs through Inventory.
 	jobs     []Job
 	interval time.Duration
 	logger   *slog.Logger
@@ -105,13 +113,15 @@ type Syncer struct {
 	Status *syncstatus.Source
 	// Retention, when set, skips runs older than it that are not stored.
 	Retention time.Duration
-	// Pattern, when set, adds the jobs it matches to jobs each pass; a job
-	// in jobs keeps its application.
-	Pattern *JobPattern
+	// Inventory supplies the discovered periodic jobs each pass.
+	Inventory InventoryStore
+	// WindowStart enables candidate-driven lookup for direct GCS mode too.
+	WindowStart func(context.Context, string) (time.Time, error)
+	Lookback    time.Duration
 }
 
-func NewSyncer(client *Client, store Store, jobs []Job, interval time.Duration, logger *slog.Logger) *Syncer {
-	return &Syncer{client: client, store: store, jobs: jobs, interval: interval, logger: logger}
+func NewSyncer(client *Client, store Store, interval time.Duration, logger *slog.Logger) *Syncer {
+	return &Syncer{client: client, store: store, interval: interval, logger: logger}
 }
 
 // Run syncs immediately and then every interval until ctx is cancelled.
@@ -137,8 +147,28 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 		s.logger.Error("discover jobs", "error", err)
 		pass.Add(fmt.Errorf("discover jobs: %w", err))
 	}
+	lookups := 0
 	for _, job := range jobs {
-		n, err := s.syncJob(ctx, job)
+		var n int
+		var err error
+		if s.WindowStart == nil {
+			n, err = s.syncJob(ctx, job)
+		} else {
+			var start time.Time
+			start, err = s.WindowStart(ctx, job.Application)
+			if err == nil && start.IsZero() {
+				continue
+			}
+			if err == nil {
+				now := time.Now().UTC()
+				if start.After(now) {
+					err = fmt.Errorf("FBC build start is in the future")
+				} else {
+					n, err = s.syncJobWindow(ctx, job, maxWindowStart(now, s.Retention, start, s.Lookback), now)
+				}
+			}
+		}
+		lookups++
 		if err != nil {
 			s.logger.Error("sync job", "job", job.Name, "error", err)
 			pass.Add(fmt.Errorf("%s: %w", job.Name, err))
@@ -146,26 +176,30 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 		}
 		s.logger.Info("synced job", "job", job.Name, "fetched", n)
 	}
-	s.Status.Report(pass.Err())
+	if lookups == 0 && pass.Err() == nil && s.WindowStart != nil {
+		s.Status.Idle("No release with a dated FBC and configured jobs")
+	} else {
+		s.Status.Report(pass.Err())
+	}
 }
 
-// discover returns the configured jobs and those Pattern matches in the
-// bucket. On a listing failure it returns the configured jobs.
+// discover returns the inventory's jobs plus any set directly on the
+// syncer (tests only). Without an inventory it returns those jobs alone.
 func (s *Syncer) discover(ctx context.Context) ([]Job, error) {
-	if s.Pattern == nil {
+	if s.Inventory == nil {
 		return s.jobs, nil
 	}
-	names, err := s.client.listDirs(ctx, "logs/", s.Pattern.prefix)
+	definitions, revision, err := s.Inventory.JobInventory(ctx)
 	if err != nil {
 		return s.jobs, err
 	}
+	if revision == "" {
+		return s.jobs, fmt.Errorf("awaiting complete periodic inventory")
+	}
 	jobs := slices.Clone(s.jobs)
-	for _, name := range names {
-		if slices.ContainsFunc(s.jobs, func(j Job) bool { return j.Name == name }) {
-			continue
-		}
-		if job, ok := s.Pattern.job(name); ok {
-			jobs = append(jobs, job)
+	for _, d := range definitions {
+		if !d.Removed && !slices.ContainsFunc(jobs, func(j Job) bool { return j.Name == d.Name }) {
+			jobs = append(jobs, d.Job())
 		}
 	}
 	return jobs, nil
@@ -176,6 +210,12 @@ func (s *Syncer) discover(ctx context.Context) ([]Job, error) {
 // is read newest first, up to its first run that predates the retention
 // window, so a long-idle job does not backfill its history.
 func (s *Syncer) syncJob(ctx context.Context, job Job) (int, error) {
+	return s.syncJobWindow(ctx, job, time.Time{}, time.Time{})
+}
+
+// syncJobWindow bounds live GCS discovery to the same candidate window as
+// Sippy. Old run metadata may be read to find the boundary, but not artifacts.
+func (s *Syncer) syncJobWindow(ctx context.Context, job Job, from, until time.Time) (int, error) {
 	ids, err := s.client.listDirs(ctx, job.Prefix, "")
 	if err != nil {
 		return 0, err
@@ -193,7 +233,10 @@ func (s *Syncer) syncJob(ctx context.Context, job Job) (int, error) {
 		return 0, err
 	}
 	cutoff := time.Now().Add(-s.Retention)
-	if unstored {
+	if !from.IsZero() {
+		cutoff = from
+	}
+	if unstored || !from.IsZero() {
 		// Build IDs are decimal, so a longer one is larger.
 		slices.SortFunc(ids, func(a, b string) int {
 			return cmp.Or(cmp.Compare(len(b), len(a)), strings.Compare(b, a))
@@ -205,11 +248,21 @@ func (s *Syncer) syncJob(ctx context.Context, job Job) (int, error) {
 		if done[id] || expired(id) {
 			continue
 		}
-		run, err := s.fetchRun(ctx, job, id)
+		run, err := s.fetchRunWindow(ctx, job, id, from, until)
 		if err != nil {
+			if errors.Is(err, errInvalidRun) {
+				s.logger.Warn("skip run", "job", job.Name, "run", id, "error", err)
+				continue
+			}
 			return n, fmt.Errorf("run %s: %w", id, err)
 		}
 		if run == nil {
+			continue
+		}
+		if !from.IsZero() && run.StartedAt != nil && run.StartedAt.Before(cutoff) {
+			break // ids are newest first: everything after is older too
+		}
+		if !until.IsZero() && (run.StartedAt == nil || run.StartedAt.After(until)) {
 			continue
 		}
 		if unstored {
@@ -268,29 +321,46 @@ func (s *Syncer) expired(ctx context.Context, job string) (func(id string) bool,
 	}, len(runs) == 0, nil
 }
 
+// errInvalidRun marks a run whose stored data Prow rejected: a bad
+// finished.json or an unusable artifact target. The walk skips such a run
+// and continues; fetch errors still fail the pass.
+var errInvalidRun = errors.New("invalid run data")
+
 // fetchRun returns nil when the run has no readable prowjob.json yet.
 func (s *Syncer) fetchRun(ctx context.Context, job Job, id string) (*Run, error) {
+	return s.fetchRunWindow(ctx, job, id, time.Time{}, time.Time{})
+}
+
+func (s *Syncer) fetchRunWindow(ctx context.Context, job Job, id string, from, until time.Time) (*Run, error) {
 	dir := job.Prefix + id + "/"
 	pjData, err := s.client.object(ctx, dir+"prowjob.json")
 	if err != nil || pjData == nil {
 		return nil, err
 	}
+	run, target, err := parseRun(job, id, pjData, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errInvalidRun, err)
+	}
+	if !from.IsZero() && (run.StartedAt == nil || run.StartedAt.Before(from)) || !until.IsZero() && (run.StartedAt == nil || run.StartedAt.After(until)) {
+		return run, nil
+	}
 	finData, err := s.client.object(ctx, dir+"finished.json")
 	if err != nil {
 		return nil, err
 	}
-	run, target, err := parseRun(job, id, pjData, finData)
-	if err != nil {
-		s.logger.Warn("skip run", "job", job.Name, "build_id", id, "error", err)
-		return nil, nil
+	if finData != nil {
+		run, target, err = parseRun(job, id, pjData, finData)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", errInvalidRun, err)
+		}
 	}
 	run.FetchedAt = time.Now().UTC()
-	if run.CompletedAt == nil {
-		return run, nil
-	}
 	run.ArtifactState = ArtifactNone
 	if target == "" {
 		return run, nil
+	}
+	if !artifactTarget.MatchString(target) {
+		return nil, fmt.Errorf("%w: invalid artifact target", errInvalidRun)
 	}
 	artifacts := dir + "artifacts/" + target + "/quay-gather/artifacts/"
 	data, err := s.client.object(ctx, artifacts+"tested-images.json")
@@ -298,11 +368,17 @@ func (s *Syncer) fetchRun(ctx context.Context, job Job, id string) (*Run, error)
 		return nil, err
 	}
 	if data != nil {
-		if run.applyArtifact(data) && run.State != "success" {
+		if run.applyArtifact(data) && run.CompletedAt != nil && run.State != "success" {
 			if run.InstallFailed, err = s.installFailed(ctx, job, id, target); err != nil {
 				return nil, err
 			}
 		}
+		return run, nil
+	}
+	if run.CompletedAt == nil {
+		// Active runs only need the exact identity artifact; the CSV
+		// fallback is not read yet, so the state stays missing.
+		run.ArtifactState = ArtifactMissing
 		return run, nil
 	}
 	if data, err = s.client.object(ctx, artifacts+"olm-csvs.yaml"); err != nil {
@@ -318,6 +394,7 @@ func (s *Syncer) fetchRun(ctx context.Context, job Job, id string) (*Run, error)
 // storage's quay-deploy step creates the quay-operator Subscription, then
 // waits for its CSV and the QuayRegistry.
 var installSteps = map[string]string{
+	"aws-s3":              "quay-deploy-aws-s3",
 	"aws-s3-nightly":      "quay-deploy-aws-s3",
 	"aws-s3-nightly-fips": "quay-deploy-aws-s3",
 	"libvirt-s3-nightly":  "quay-deploy-aws-s3",
@@ -338,5 +415,5 @@ func (s *Syncer) installFailed(ctx context.Context, job Job, id, target string) 
 		return false, err
 	}
 	var fin finished
-	return json.Unmarshal(data, &fin) == nil && fin.Result == "FAILURE", nil
+	return json.Unmarshal(data, &fin) == nil && strings.EqualFold(fin.Result, "FAILURE"), nil
 }

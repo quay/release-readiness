@@ -299,7 +299,45 @@ export interface ShipmentMR {
 	source: "pointer" | "search";
 }
 
+export interface Validation {
+	plan_known: boolean;
+	revision: string;
+	source_fresh: boolean;
+	ready: boolean;
+	total: number;
+	passed: number;
+	failed: number;
+	running: number;
+	missing: number;
+	rows?: ValidationRow[];
+}
+export interface ValidationRow {
+	ci_result?: "passed" | "failed" | "running";
+	fbc_match?: "selected" | "newer" | "different" | "unverified";
+	tested_fbc?: { digest: string; nvr?: string };
+	selected_fbc?: { digest: string; nvr?: string };
+	display_name?: string;
+	evidence?: string;
+	job: string;
+	ocp: string;
+	cloud: string;
+	storage: string;
+	architecture: string;
+	mode: string;
+	source_url: string;
+	state: "passed" | "failed" | "running" | "missing";
+	run_url?: string;
+}
+export interface PortfolioFacts {
+	stage: "validation" | "shipment" | "available";
+	verdict: Verdict;
+	validation: Validation;
+	error?: string;
+}
 export interface ReleaseOverview {
+	published?: boolean;
+	shipped?: boolean;
+	portfolio?: PortfolioFacts;
 	release: ReleaseVersion;
 	issue_summary?: IssueSummary;
 	readiness: ReadinessResponse;
@@ -312,10 +350,12 @@ export interface ReleaseOverview {
 
 /** GET /releases/{version}. */
 export interface ReleaseDetail extends ReleaseVersion {
+	published?: boolean;
 	shipment_mr: ShipmentMR | null;
 }
 
 export interface DashboardConfig {
+	app_version?: string;
 	jira_base_url: string;
 	jira_project: string;
 	jira_enabled: boolean;
@@ -340,4 +380,22 @@ export interface SyncStatus {
 	problems: SyncProblem[];
 	/** Every tracked source, sorted. */
 	sources: SyncSource[];
+}
+
+export interface CIHistoryRun {
+	job: string;
+	build_id: string;
+	display_name?: string;
+	state: string;
+	started_at: string;
+	prow_url: string;
+	fbc_match: "exact" | "different" | "unverified";
+	fbc?: { digest: string; nvr?: string };
+}
+
+export interface CIHistoryPage {
+	runs: CIHistoryRun[];
+	job?: ValidationRow;
+	selected_fbcs: { digest: string; nvr?: string }[];
+	next_cursor?: string;
 }

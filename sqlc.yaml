@@ -2,7 +2,9 @@ version: "2"
 sql:
   - engine: "sqlite"
     queries: "internal/db/queries/"
-    schema: "internal/db/schema.sql"
+    schema:
+      - "internal/db/schema.sql"
+      - "internal/db/002_prow_inventory.sql"
     gen:
       go:
         package: "dbsqlc"

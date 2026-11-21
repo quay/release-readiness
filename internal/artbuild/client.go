@@ -6,15 +6,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/quay/release-readiness/internal/workpool"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // Client reads the ART build history service.
 type Client struct {
 	baseURL string
 	http    *http.Client
+	// MinRequestInterval is shared by resolver, history and scan callers.
+	MinRequestInterval time.Duration
+	pace               workpool.Pacer
 }
 
 func NewClient(baseURL string, hc *http.Client) *Client {
@@ -90,6 +95,9 @@ func (c *Client) BuildPipelineURL(ctx context.Context, nvr, recordID string) (st
 }
 
 func (c *Client) get(ctx context.Context, path string, v any) error {
+	if err := c.pace.Wait(ctx, c.MinRequestInterval); err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
 		return err

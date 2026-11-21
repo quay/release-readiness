@@ -147,3 +147,24 @@ func TestPass(t *testing.T) {
 		t.Errorf("Err = %q, want %q", got, want)
 	}
 }
+
+func TestIdleDoesNotInventFreshnessAndResumesFailureTracking(t *testing.T) {
+	r := New()
+	source := r.Track("prow", time.Minute)
+	source.Report(errors.New("old failure"))
+	source.Idle("Waiting for a dated FBC")
+	if p := r.Problems(time.Now().Add(time.Hour)); len(p) != 0 {
+		t.Fatalf("idle source marked stale: %+v", p)
+	}
+	if r.Sources()[0].LastSuccess != nil || r.Sources()[0].IdleReason == "" {
+		t.Fatal("idle source claimed a fetch")
+	}
+	source.Report(errors.New("new failure"))
+	if len(r.Problems(time.Now())) != 1 || r.Sources()[0].IdleReason != "" {
+		t.Fatal("resumed failures hidden")
+	}
+	source.Report(nil)
+	if r.Sources()[0].LastSuccess == nil || len(r.Problems(time.Now())) != 0 {
+		t.Fatal("successful fetch not tracked")
+	}
+}

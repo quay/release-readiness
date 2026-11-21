@@ -1,4 +1,6 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
+import { validation } from "./fixtures/portfolio.ts";
+import { captureFullPage } from "./helpers/screenshots.ts";
 
 const version = "quay-v3.18.1";
 const mrURL = "https://gitlab.example/merge_requests/948";
@@ -25,7 +27,9 @@ async function mockRelease(
 	page: Page,
 	mr: { state: "opened" | "merged"; stage: "prod_released" | "shipped" },
 ) {
-	await page.route("**/api/v1/config", (route) => route.fulfill({ json: config }));
+	await page.route("**/api/v1/config", (route) =>
+		route.fulfill({ json: config }),
+	);
 	await page.route("**/api/v1/sync-status", (route) =>
 		route.fulfill({ json: { problems: [], sources: [] } }),
 	);
@@ -56,6 +60,12 @@ async function mockRelease(
 	await page.route(`**/api/v1/releases/${version}/ci`, (route) =>
 		route.fulfill({ json: [] }),
 	);
+	await page.route("**/api/v1/releases/overview*", (route) =>
+		route.fulfill({ json: [] }),
+	);
+	await page.route(`**/api/v1/releases/${version}/validation`, (route) =>
+		route.fulfill({ json: validation }),
+	);
 }
 
 test("shows an open shipment MR as unshipped even after the version releases", async ({
@@ -69,23 +79,21 @@ test("shows an open shipment MR as unshipped even after the version releases", a
 	await expect(shipment).toHaveText("Shipment MR open");
 	await expect(page.getByText("Production release succeeded")).toHaveCount(0);
 	await expect(shipment).not.toHaveText("Shipment MR: shipped");
-	await expect(page.getByText("Shipment MR: shipped", { exact: true })).toHaveCount(
-		0,
-	);
-	await page.screenshot({
-		path: testInfo.outputPath("open-shipment-mr.png"),
-		fullPage: true,
-	});
+	await expect(
+		page.getByText("Shipment MR: shipped", { exact: true }),
+	).toHaveCount(0);
+	await captureFullPage(page, testInfo.outputPath("open-shipment-mr.png"));
 });
 
-test("shows a shipment MR as shipped after it merges", async ({ page }, testInfo) => {
+test("shows a shipment MR as shipped after it merges", async ({
+	page,
+}, testInfo) => {
 	await mockRelease(page, { state: "merged", stage: "shipped" });
 
 	await page.goto(`/releases/${version}`);
 
-	await expect(page.locator(`a[href="${mrURL}"]`)).toHaveText("Shipment MR: shipped");
-	await page.screenshot({
-		path: testInfo.outputPath("merged-shipment-mr.png"),
-		fullPage: true,
-	});
+	await expect(page.locator(`a[href="${mrURL}"]`)).toHaveText(
+		"Shipment MR: shipped",
+	);
+	await captureFullPage(page, testInfo.outputPath("merged-shipment-mr.png"));
 });

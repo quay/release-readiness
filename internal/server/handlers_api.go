@@ -18,6 +18,7 @@ import (
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	// The JIRA sync is tracked only when the server was started with a token.
 	writeJSON(w, http.StatusOK, map[string]any{
+		"app_version":       AppVersion,
 		"jira_base_url":     s.jiraBaseURL,
 		"jira_project":      s.jiraProject,
 		"jira_enabled":      s.syncStatus.Tracks("jira"),
@@ -55,10 +56,14 @@ func (s *Server) handleGetRelease(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	_, catalogShipped := s.selector.CatalogShippedAt(version)
 	writeJSON(w, http.StatusOK, struct {
 		*model.ReleaseVersion
+		Published  bool              `json:"published"`
 		ShipmentMR *model.ShipmentMR `json:"shipment_mr"`
-	}{release, mr})
+		// The same gate as the overview: the catalog confirms a release
+		// JIRA has marked released; a catalog push alone ships nothing.
+	}{release, catalogShipped && release.Released, mr})
 }
 
 func (s *Server) handleListReleaseIssues(w http.ResponseWriter, r *http.Request) {
@@ -155,7 +160,8 @@ func (s *Server) handleReleasesOverview(w http.ResponseWriter, r *http.Request) 
 			IssueSummary: summary,
 			Readiness:    computeReadiness(&rel, latest != nil, catalogShipped, time.Now()),
 			LatestBuild:  latest,
-			Shipped:      catalogShipped || rel.Released,
+			Shipped:      rel.Released,
+			Published:    catalogShipped && rel.Released,
 			ShipmentMR:   mrs[rel.Name],
 		}
 		if !shippedAt.IsZero() {
@@ -163,6 +169,39 @@ func (s *Server) handleReleasesOverview(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	markNextInStream(overviews)
+	if r.URL.Query().Get("portfolio") == "1" {
+		for i := range overviews {
+			ov := &overviews[i]
+			facts := &model.PortfolioFacts{Stage: "validation"}
+			ov.Portfolio = facts
+			if ov.Published {
+				// The stage is settled and the UI reads no verdict here, and
+				// ReleaseCandidate loads the application's full run history:
+				// the cost of this loop grows with releases times runs. Keep
+				// only the plan hint behind "No CI configured".
+				facts.Stage = "available"
+				plan := s.ValidationPlans[ov.Release.KonfluxApplication]
+				if s.InventoryPlans != nil {
+					plan = s.InventoryPlans.Plan(ov.Release.KonfluxApplication)
+				}
+				facts.Validation = model.Validation{PlanKnown: plan.Revision != "", Total: len(plan.Jobs)}
+				continue
+			}
+			candidate, runs, err := s.selector.ReleaseCandidate(ctx, &ov.Release)
+			if err != nil {
+				facts.Error = "Candidate evidence unavailable"
+				continue
+			}
+			facts.Verdict = candidate.Verdict
+			facts.Validation = s.validation(ov.Release.KonfluxApplication, candidate, runs)
+			facts.Validation.Rows = nil
+			if ov.Published {
+				facts.Stage = "available"
+			} else if facts.Validation.Ready {
+				facts.Stage = "shipment"
+			}
+		}
+	}
 
 	writeJSON(w, http.StatusOK, overviews)
 }
@@ -200,9 +239,6 @@ func markNextInStream(overviews []model.ReleaseOverview) {
 func computeReadiness(release *model.ReleaseVersion, hasSnapshot, catalogShipped bool, now time.Time) model.ReadinessResponse {
 	if release.Released {
 		return model.ReadinessResponse{Signal: "green", Message: "Released"}
-	}
-	if catalogShipped {
-		return model.ReadinessResponse{Signal: "green", Message: "Shipped"}
 	}
 
 	var signal, message string

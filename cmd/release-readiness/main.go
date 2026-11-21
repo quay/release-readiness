@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -40,6 +41,7 @@ func main() {
 
 	// Konflux flags
 	kubeconfig := flag.String("kubeconfig", os.Getenv("KUBECONFIG"), "kubeconfig path (empty uses the in-cluster service account)")
+	basePath := flag.String("base-path", os.Getenv("BASE_PATH"), "URL prefix the app is served under (e.g. /v2), stripped from requests before routing; empty serves at the root")
 	namespace := flag.String("namespace", cmp.Or(os.Getenv("KONFLUX_NAMESPACE"), "art-quay-tenant"), "Konflux namespace to read Snapshots and Releases from")
 	konfluxPollInterval := flag.Duration("konflux-poll-interval", 30*time.Second, "Konflux sync poll interval")
 	konfluxUIURL := flag.String("konflux-ui-url", cmp.Or(os.Getenv("KONFLUX_UI_URL"), "https://konflux-ui.apps.kflux-ocp-p01.7ayg.p1.openshiftapps.com"), "Konflux UI URL for links to -namespace's applications, Snapshots and Releases (empty disables Konflux links)")
@@ -55,6 +57,8 @@ func main() {
 	// ART build history flags
 	artURL := flag.String("art-build-history-url", "https://art-build-history-art-build-history.apps.artc2023.pc3z.p1.openshiftapps.com", "ART build history service URL (empty disables ART build links)")
 
+	artGroups := flag.String("art-groups", os.Getenv("ART_GROUPS"), "comma-separated ART history groups (e.g. quay-3.18,quay-5.0); empty waits for configuration")
+
 	// ART FBC tag flags
 	artFBCQuayURL := flag.String("art-fbc-quay-url", artfbc.DefaultQuayURL, "Quay URL to list the tags of ART's public ocp-art-tenant/art-fbc repository from, unauthenticated, for the release inputs (empty disables)")
 
@@ -65,8 +69,6 @@ func main() {
 	catalogURL := flag.String("catalog-url", "https://catalog.redhat.com/api/containers/v1", "Red Hat container catalog API URL (empty leaves JIRA's released flag as the only shipped signal)")
 
 	// Prow flags
-	prowJobs := flag.String("prow-jobs", os.Getenv("PROW_JOBS"), "periodic Prow jobs to ingest, as job_name=konflux_application[,...] (e.g. ...-aws-s3-nightly=quay-3-18)")
-	prowJobPattern := flag.String("prow-job-pattern", os.Getenv("PROW_JOB_PATTERN"), "^-anchored regexp of periodic Prow job names to discover; its named groups major and minor give the application quay-<major>-<minor>, and a -prow-jobs entry overrides it")
 	prowInterval := flag.Duration("prow-interval", 15*time.Minute, "Prow sync poll interval")
 
 	// GitLab shipment MR flags
@@ -90,22 +92,58 @@ func main() {
 	jiraWriteEmail := flag.String("jira-write-email", os.Getenv("JIRA_WRITE_EMAIL"), "JIRA Cloud account email of the write credential")
 	jiraWriteToken := flag.String("jira-write-token", os.Getenv("JIRA_WRITE_TOKEN"), "JIRA Cloud API token of the write credential, never the -jira-token one")
 
+	validationPlanPath := flag.String("validation-plan", os.Getenv("VALIDATION_PLAN"), "legacy required-job JSON; ignored when -prow-job-discovery is enabled")
+	jobDiscovery := flag.Bool("prow-job-discovery", os.Getenv("PROW_JOB_DISCOVERY") == "true", "import required release periodics from openshift/release")
+	inventoryInterval := flag.Duration("prow-inventory-interval", 10*time.Minute, "periodic configuration refresh interval")
+	sippyURL := flag.String("sippy-url", os.Getenv("SIPPY_URL"), "Sippy API base URL; empty uses legacy GCS ingestion")
+	ciStreamBudget := flag.Duration("ci-stream-budget", 2*time.Minute, "time budget per Sippy stream or live GCS job")
+	ciWorkers := flag.Int("ci-workers", 4, "maximum concurrent CI artifact fetches")
+	jiraWorkers := flag.Int("jira-workers", 2, "maximum concurrent JIRA release issue fetches")
+	artWorkers := flag.Int("art-workers", 2, "maximum concurrent ART component resolutions")
+	ciLookback := flag.Duration("ci-candidate-lookback", 24*time.Hour, "lookback before an ART FBC build for CI runs that started earlier")
+	legacyInterval := flag.Duration("prow-live-refresh-interval", 2*time.Minute, "GCS discovery interval for queued/running jobs absent from Sippy; 0 disables")
+	historyInterval := flag.Duration("prow-history-interval", time.Hour, "best-effort historical CI interval; one stream per pass, 0 disables")
+	historyBudget := flag.Duration("prow-history-budget", 30*time.Second, "maximum time per historical CI pass after unreleased streams")
+	artCurrentBudget := flag.Duration("art-current-budget", 2*time.Minute, "time budget for current-release ART history per pass")
+	artHistoryBudget := flag.Duration("art-history-budget", 30*time.Second, "best-effort historical ART time budget")
+	artHistoryInterval := flag.Duration("art-history-interval", time.Hour, "historical ART interval; one stream per pass, 0 disables")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	slog.SetDefault(logger)
-
-	prowJobList, err := prow.ParseJobs(*prowJobs)
-	if err != nil {
-		logger.Error("parse -prow-jobs", "error", err)
-		os.Exit(1)
-	}
-	var prowPattern *prow.JobPattern
-	if *prowJobPattern != "" {
-		if prowPattern, err = prow.ParseJobPattern(*prowJobPattern); err != nil {
-			logger.Error("parse -prow-job-pattern", "error", err)
+	for _, n := range []int{*ciWorkers, *jiraWorkers, *artWorkers} {
+		if n < 1 || n > 64 {
+			logger.Error("worker counts must be between 1 and 64")
 			os.Exit(1)
 		}
+	}
+	if *basePath != "" && (!strings.HasPrefix(*basePath, "/") || *basePath == "/" || strings.HasSuffix(*basePath, "/")) {
+		logger.Error("base path must look like /v2: leading slash, no trailing slash, not root")
+		os.Exit(1)
+	}
+	if *ciStreamBudget <= 0 || *inventoryInterval <= 0 || *prowInterval <= 0 || *jiraPollInterval <= 0 || *ciLookback < 0 || *legacyInterval < 0 || *historyInterval < 0 || *historyBudget <= 0 || *artCurrentBudget <= 0 || *artHistoryBudget <= 0 || *artHistoryInterval < 0 {
+		logger.Error("invalid sync interval or lookback")
+		os.Exit(1)
+	}
+	if *sippyURL != "" && !*jobDiscovery {
+		logger.Error("-sippy-url requires -prow-job-discovery")
+		os.Exit(1)
+	}
+
+	groups, err := artbuild.ParseGroups(*artGroups)
+	if err != nil {
+		logger.Error("invalid ART groups", "error", err)
+		os.Exit(1)
+	}
+
+	planPath := *validationPlanPath
+	if *jobDiscovery {
+		planPath = ""
+	}
+	validationPlans, err := release.LoadValidationPlans(planPath)
+	if err != nil {
+		logger.Error("read validation plan", "error", err)
+		os.Exit(1)
 	}
 	var stagePlans *regexp.Regexp
 	if *stagePlanPattern != "" {
@@ -136,6 +174,19 @@ func main() {
 			logger.Warn("save sync status", "source", source, "error", err)
 		}
 	})
+
+	var inventoryPlans *release.PlanRegistry
+	if *jobDiscovery {
+		inventoryPlans = release.NewPlanRegistry()
+		definitions, revision, err := database.JobInventory(ctx)
+		if err != nil {
+			logger.Error("load periodic inventory", "error", err)
+			os.Exit(1)
+		}
+		inventoryPlans.Update(definitions, revision)
+		discovery := &prow.InventorySync{Client: prow.NewInventoryClient(*githubToken), Store: database, Status: status.Track("prow-inventory", *inventoryInterval), Updated: inventoryPlans.Update}
+		wg.Go(func() { discovery.Run(ctx, *inventoryInterval) })
+	}
 
 	kubeCfg, err := kube.RESTConfig(*kubeconfig)
 	var kc *dynamic.DynamicClient
@@ -172,21 +223,44 @@ func main() {
 			})
 		}
 		syncer := jira.NewSyncer(jiraClient, database, jiraTx, jiraLog)
+		syncer.Workers = *jiraWorkers
 		syncer.Status = status.Track("jira", *jiraPollInterval)
 		wg.Go(func() { syncer.Run(ctx, *jiraPollInterval) })
 	}
+
+	var shipped *catalog.Shipped
+	if *catalogURL != "" {
+		logger.Info("catalog shipped lookup enabled", "url", *catalogURL)
+		shipped = catalog.NewShipped(catalog.NewClient(*catalogURL, &http.Client{Timeout: time.Minute}), logger.With("component", "catalog"))
+		shipped.Status = status.Track("catalog", time.Hour)
+		wg.Go(func() { shipped.Run(ctx, time.Hour) })
+	}
+
+	selector := release.NewSelector(database, shipped)
+	selector.ArtBaseURL = *artURL
+	selector.StageReleasePlanPattern = stagePlans
 
 	var art *artbuild.Client
 	if *artURL != "" {
 		artLog := logger.With("component", "art-resolve")
 		logger.Info("art build history enabled", "url", *artURL)
 		art = artbuild.NewClient(*artURL, &http.Client{Timeout: time.Minute})
+		art.MinRequestInterval = time.Second
 		resolver := artbuild.NewResolver(art, database, artLog)
+		resolver.Workers = *artWorkers
 		resolver.Status = status.Track("art-builds", 5*time.Minute)
 		wg.Go(func() { resolver.Run(ctx, 5*time.Minute) })
 		history := artbuild.NewHistorySync(art, database, logger.With("component", "art-history"))
-		history.Status = status.Track("art-history", 10*time.Minute)
-		wg.Go(func() { history.Run(ctx, 10*time.Minute) })
+		history.Activity = selector.IngestionActivity
+		history.Groups = groups
+		history.ForegroundBudget = *artCurrentBudget
+		history.BackfillBudget = *artHistoryBudget
+		history.BackfillInterval = *artHistoryInterval
+		history.Status = status.Track("art-history", 2*time.Minute)
+		if *artHistoryInterval > 0 {
+			history.BackfillStatus = status.Track("art-backfill", 0)
+		}
+		wg.Go(func() { history.Run(ctx, 2*time.Minute) })
 		render := fbc.NewSync(fbc.NewRegistry(&http.Client{Timeout: 5 * time.Minute}), database, history, logger.With("component", "fbc-render"))
 		render.Status = status.Track("fbc-render", 10*time.Minute)
 		wg.Go(func() { render.Run(ctx, 10*time.Minute) })
@@ -216,21 +290,23 @@ func main() {
 		wg.Go(func() { reconciler.Run(ctx, 10*time.Minute) })
 	}
 
-	var shipped *catalog.Shipped
-	if *catalogURL != "" {
-		logger.Info("catalog shipped lookup enabled", "url", *catalogURL)
-		shipped = catalog.NewShipped(catalog.NewClient(*catalogURL, &http.Client{Timeout: time.Minute}), logger.With("component", "catalog"))
-		shipped.Status = status.Track("catalog", time.Hour)
-		wg.Go(func() { shipped.Run(ctx, time.Hour) })
-	}
-
-	if len(prowJobList) > 0 || prowPattern != nil {
-		logger.Info("prow sync enabled", "jobs", len(prowJobList), "pattern", *prowJobPattern, "interval", *prowInterval)
-		syncer := prow.NewSyncer(prow.NewClient(prow.DefaultBaseURL), database, prowJobList, *prowInterval, logger.With("component", "prow-sync"))
+	if *jobDiscovery {
+		logger.Info("prow sync enabled", "interval", *prowInterval)
+		syncer := prow.NewSyncer(prow.NewClient(prow.DefaultBaseURL), database, *prowInterval, logger.With("component", "prow-sync"))
 		syncer.Status = status.Track("prow", *prowInterval)
 		syncer.Retention = *retention
-		syncer.Pattern = prowPattern
-		wg.Go(func() { syncer.Run(ctx) })
+		syncer.WindowStart = selector.CIWindowStart
+		syncer.Lookback = *ciLookback
+		syncer.Inventory = database
+		if *sippyURL != "" {
+			indexed := &prow.SippySync{Client: prow.NewSippyClient(*sippyURL), Artifacts: syncer, Store: database, Activity: selector.IngestionActivity, WindowStart: selector.CIWindowStart, Status: syncer.Status, Workers: *ciWorkers, StreamBudget: *ciStreamBudget, Retention: *retention, Lookback: *ciLookback, LegacyInterval: *legacyInterval, HistoryInterval: *historyInterval, HistoryBudget: *historyBudget}
+			if *historyInterval > 0 {
+				indexed.HistoryStatus = status.Track("prow-history", 0)
+			}
+			wg.Go(func() { indexed.Run(ctx, *prowInterval) })
+		} else {
+			wg.Go(func() { syncer.Run(ctx) })
+		}
 	}
 
 	if *retention > 0 {
@@ -256,11 +332,11 @@ func main() {
 		})
 	}
 
-	selector := release.NewSelector(database, shipped)
-	selector.ArtBaseURL = *artURL
-	selector.StageReleasePlanPattern = stagePlans
 	srv := server.New(database, *addr, *jiraURL, *jiraProject, selector, status, logger)
+	srv.ValidationPlans = validationPlans
+	srv.InventoryPlans = inventoryPlans
 	srv.KonfluxUIURL = *konfluxUIURL
+	srv.BasePath = *basePath
 	srv.KonfluxNamespace = *namespace
 
 	if *artFBCQuayURL != "" {

@@ -1,0 +1,247 @@
+# Release Readiness — plain-apply manifest.
+#
+# The same Deployment setup the app runs with in production: dynamic Prow
+# job discovery with Sippy, explicit ART groups, accelerated history
+# backfill, JIRA read-only by default (the FBC JIRA writer is opt-in
+# with its separate credential), a mounted Konflux reader kubeconfig, and the
+# cluster's injected trusted CA. Apply with:
+#
+#   oc apply -n <namespace> -f deploy/app.yaml
+#
+# This file references Secrets BY NAME ONLY; it contains no credentials.
+# Create them before the first rollout (values are yours, never committed):
+#
+#   oc create secret generic release-readiness-jira \
+#     --from-literal=JIRA_EMAIL=<email> --from-literal=JIRA_TOKEN=<token>
+#   oc create secret generic release-readiness-konflux-kubeconfig \
+#     --from-file=kubeconfig=<minified reader kubeconfig>
+#   # Optional:
+#   oc create secret generic release-readiness-gitlab --from-file=token=<token>
+#   oc create secret generic release-readiness-github --from-file=token=<token>
+#
+# Build and push the image first (see the README); then point IMAGE below
+# at it. To serve under a URL prefix, build with VITE_BASE=<prefix> and set
+# BASE_PATH below to the same value.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: release-readiness-data
+  labels:
+    app: release-readiness
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: release-readiness-trusted-ca
+  labels:
+    app: release-readiness
+    # OpenShift fills ca-bundle.crt with the cluster's trusted CA bundle,
+    # which includes internal roots the image does not trust.
+    config.openshift.io/inject-trusted-cabundle: "true"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: release-readiness
+  labels:
+    app: release-readiness
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+  selector:
+    app: release-readiness
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: release-readiness
+  labels:
+    app: release-readiness
+spec:
+  to:
+    kind: Service
+    name: release-readiness
+  port:
+    targetPort: 8080
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: release-readiness
+  labels:
+    app: release-readiness
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: release-readiness
+  template:
+    metadata:
+      labels:
+        app: release-readiness
+    spec:
+      containers:
+        - name: dashboard
+          # Replace with your registry and tag; the tag is mutable, so
+          # always pull on (re)start.
+          image: quay.io/your-org/release-readiness:latest
+          imagePullPolicy: Always
+          args:
+            - -addr
+            - :8080
+            - -db
+            - /data/release-readiness.db
+            - -konflux-poll-interval
+            - 10m
+            # These settings are command-line flags with no env fallback:
+            # pass them as args, expanded from the env values below.
+            - -prow-history-interval
+            - $(PROW_HISTORY_INTERVAL)
+            - -prow-history-budget
+            - $(PROW_HISTORY_BUDGET)
+            - -art-history-interval
+            - $(ART_HISTORY_INTERVAL)
+            - -art-history-budget
+            - $(ART_HISTORY_BUDGET)
+          env:
+            # Dynamic Prow periodic inventory defines the required-jobs
+            # matrix; Sippy indexes the runs.
+            - name: PROW_JOB_DISCOVERY
+              value: "true"
+            - name: SIPPY_URL
+              value: https://sippy.dptools.openshift.org
+            # ART history stream groups: the guaranteed floor. Groups
+            # derived from stored Konflux snapshots are added on top, so a
+            # new stream needs no edit here once it has a snapshot.
+            - name: ART_GROUPS
+              value: quay-3.9,quay-3.10,quay-3.12,quay-3.14,quay-3.15,quay-3.16,quay-3.17,quay-3.18,quay-5.0
+            # History backfill: releases' CI runs and ART history fill
+            # faster than the conservative defaults (1h / 30s). History is
+            # observe-only and never counts toward readiness.
+            - name: PROW_HISTORY_INTERVAL
+              value: 5m
+            - name: PROW_HISTORY_BUDGET
+              value: 10m
+            - name: ART_HISTORY_INTERVAL
+              value: 5m
+            - name: ART_HISTORY_BUDGET
+              value: 10m
+            # Serve under a URL prefix: build the image with the same
+            # VITE_BASE and set BASE_PATH to it; empty serves at the root.
+            - name: BASE_PATH
+              value: ""
+            - name: KUBECONFIG
+              value: /etc/konflux/kubeconfig
+            - name: KONFLUX_NAMESPACE
+              value: art-quay-tenant
+            - name: SSL_CERT_FILE
+              value: /etc/pki/ca-trust-injected/ca-bundle.crt
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  key: token
+                  name: release-readiness-github
+                  optional: true
+            - name: GITLAB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  key: token
+                  name: release-readiness-gitlab
+                  optional: true
+            # The FBC JIRA writer is off by default. Production enables it
+            # by setting JIRA_WRITE=true together with its separate write
+            # credential (the release-readiness-jira-write secret, keys
+            # email and token — never the read credential). The optional
+            # refs below make enabling a one-line change.
+            - name: JIRA_WRITE_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  key: email
+                  name: release-readiness-jira-write
+                  optional: true
+            - name: JIRA_WRITE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  key: token
+                  name: release-readiness-jira-write
+                  optional: true
+          envFrom:
+            # JIRA_EMAIL and JIRA_TOKEN: the read credential.
+            - secretRef:
+                name: release-readiness-jira
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /api/v1/health
+              port: 8080
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 120
+            successThreshold: 1
+            timeoutSeconds: 10
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /api/v1/health
+              port: 8080
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 60
+            successThreshold: 1
+            timeoutSeconds: 10
+          volumeMounts:
+            - mountPath: /data
+              name: data
+            - mountPath: /etc/konflux
+              name: konflux-kubeconfig
+              readOnly: true
+            - mountPath: /etc/pki/ca-trust-injected
+              name: trusted-ca
+              readOnly: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: release-readiness-data
+        - name: konflux-kubeconfig
+          secret:
+            defaultMode: 420
+            secretName: release-readiness-konflux-kubeconfig
+        - name: trusted-ca
+          configMap:
+            defaultMode: 420
+            name: release-readiness-trusted-ca
+      terminationGracePeriodSeconds: 30

@@ -4,10 +4,8 @@ package prow
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"regexp"
-	"regexp/syntax"
 	"slices"
 	"strings"
 	"time"
@@ -47,63 +45,6 @@ type Job struct {
 	Name        string
 	Prefix      string
 	Application string
-}
-
-// ParseJobs parses "job_name=application[,job_name=application...]".
-func ParseJobs(spec string) ([]Job, error) {
-	var jobs []Job
-	for entry := range strings.SplitSeq(spec, ",") {
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			continue
-		}
-		key, app, ok := strings.Cut(entry, "=")
-		key, app = strings.TrimSpace(key), strings.TrimSpace(app)
-		if !ok || key == "" || app == "" {
-			return nil, fmt.Errorf("invalid entry %q, want job_name=application", entry)
-		}
-		jobs = append(jobs, Job{Name: key, Prefix: "logs/" + key + "/", Application: app})
-	}
-	return jobs, nil
-}
-
-// JobPattern matches the names of jobs to discover. Its major and minor
-// groups name a job's application, quay-<major>-<minor>.
-type JobPattern struct {
-	re *regexp.Regexp
-	// prefix starts every name re matches, to narrow the listing.
-	prefix string
-}
-
-// ParseJobPattern compiles expr, which must have major and minor groups.
-func ParseJobPattern(expr string) (*JobPattern, error) {
-	re, err := regexp.Compile(expr)
-	if err != nil {
-		return nil, err
-	}
-	if re.SubexpIndex("major") < 0 || re.SubexpIndex("minor") < 0 {
-		return nil, errors.New("pattern needs named groups major and minor")
-	}
-	p := &JobPattern{re: re}
-	// Only a regexp anchored before every branch has a literal prefix that
-	// starts every name it matches; LiteralPrefix is empty for one.
-	if t, err := syntax.Parse(expr, syntax.Perl); err == nil {
-		if t = t.Simplify(); t.Op == syntax.OpConcat && len(t.Sub) > 1 && t.Sub[0].Op == syntax.OpBeginText &&
-			t.Sub[1].Op == syntax.OpLiteral && t.Sub[1].Flags&syntax.FoldCase == 0 {
-			p.prefix = string(t.Sub[1].Rune)
-		}
-	}
-	return p, nil
-}
-
-// job returns the Job of name, if p matches it.
-func (p *JobPattern) job(name string) (Job, bool) {
-	m := p.re.FindStringSubmatch(name)
-	if m == nil {
-		return Job{}, false
-	}
-	app := "quay-" + m[p.re.SubexpIndex("major")] + "-" + m[p.re.SubexpIndex("minor")]
-	return Job{Name: name, Prefix: "logs/" + name + "/", Application: app}, true
 }
 
 type prowJob struct {
@@ -175,17 +116,27 @@ func parseRun(job Job, buildID string, pjData, finData []byte) (*Run, string, er
 		ArtifactState: ArtifactMissing,
 	}
 	if finData != nil {
-		var fin finished
-		if err := json.Unmarshal(finData, &fin); err != nil {
-			return nil, "", fmt.Errorf("parse finished.json: %w", err)
+		if err := r.applyCompletion(finData); err != nil {
+			return nil, "", err
 		}
-		if fin.Result != "" {
-			r.State = strings.ToLower(fin.Result)
-		}
-		t := time.Unix(fin.Timestamp, 0).UTC()
-		r.CompletedAt = &t
 	}
 	return r, pj.target(), nil
+}
+
+// applyCompletion validates the authoritative terminal result shared by direct
+// GCS discovery and Sippy-indexed runs. Invalid records never imply success.
+func (r *Run) applyCompletion(data []byte) error {
+	var fin finished
+	if err := json.Unmarshal(data, &fin); err != nil {
+		return fmt.Errorf("parse finished.json: %w", err)
+	}
+	state := strings.ToLower(strings.TrimSpace(fin.Result))
+	if fin.Timestamp <= 0 || !slices.Contains([]string{"success", "failure", "error", "aborted"}, state) {
+		return fmt.Errorf("invalid completion record")
+	}
+	completed := time.Unix(fin.Timestamp, 0).UTC()
+	r.State, r.CompletedAt = state, &completed
+	return nil
 }
 
 // applyArtifact records tested-images.json on r and reports whether it saw a

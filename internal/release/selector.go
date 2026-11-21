@@ -68,3 +68,49 @@ func (s *Selector) ShipmentVersions(ctx context.Context) ([]string, error) {
 	}
 	return versions, nil
 }
+
+// IngestionActivity shares the dashboard's confirmed-publication signal while
+// keeping mixed and unknown streams in the foreground. JIRA release flags alone
+// remain useful when the catalog is disabled or unavailable.
+func (s *Selector) IngestionActivity(ctx context.Context) (map[string]bool, error) {
+	versions, err := s.db.ListAllReleaseVersions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	fresh := s.shipped.Fresh(time.Now())
+	activity := map[string]bool{}
+	for _, v := range versions {
+		if v.KonfluxApplication == "" {
+			continue
+		}
+		active := !v.Archived && !v.Released && (!fresh || !s.CatalogShipped(v.Name))
+		activity[v.KonfluxApplication] = activity[v.KonfluxApplication] || active
+	}
+	return activity, nil
+}
+
+// CIWindowStart joins known releases to dated ART FBCs. Upcoming releases
+// exclude published z-streams; historical-only streams are eligible for paced backfill.
+// Zero means no matched dated FBC, so the scheduler must not query CI.
+func (s *Selector) CIWindowStart(ctx context.Context, app string) (time.Time, error) {
+	versions, err := s.db.ListAllReleaseVersions(ctx)
+	if err != nil {
+		return time.Time{}, err
+	}
+	fresh := s.shipped.Fresh(time.Now())
+	var active, historical []string
+	for _, v := range versions {
+		if v.KonfluxApplication != app {
+			continue
+		}
+		if !v.Archived && !v.Released && (!fresh || !s.CatalogShipped(v.Name)) {
+			active = append(active, v.Name)
+		} else {
+			historical = append(historical, v.Name)
+		}
+	}
+	if len(active) == 0 {
+		active = historical
+	}
+	return s.db.CandidateWindowStartForVersions(ctx, app, active)
+}

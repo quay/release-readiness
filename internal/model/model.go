@@ -24,9 +24,14 @@ type ReleaseOverview struct {
 	IssueSummary *IssueSummary     `json:"issue_summary,omitempty"`
 	Readiness    ReadinessResponse `json:"readiness"`
 	LatestBuild  *time.Time        `json:"latest_build,omitempty"`
-	// Shipped is set when the catalog published the version's tag or JIRA
-	// marks it released.
-	Shipped bool `json:"-"`
+	// Shipped is set when JIRA marks the version released: the release
+	// ticket's project version is the authority for having shipped. A
+	// catalog image push alone does not ship a release.
+	Shipped bool `json:"shipped"`
+	// Published is set when the catalog lists a released version's tag:
+	// the confirmation customers can pull it. It implies Shipped.
+	Published bool            `json:"published"`
+	Portfolio *PortfolioFacts `json:"portfolio,omitempty"`
 	// ShippedAt is when the catalog first published the version, nil when
 	// it has not or gave no date.
 	ShippedAt *time.Time `json:"shipped_at,omitempty"`

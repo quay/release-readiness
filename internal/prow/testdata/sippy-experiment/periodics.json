@@ -1,0 +1,257 @@
+{
+  "revision": "3ca4fedc6eb1f5780ae883509cf3377d4297b5ea",
+  "jobs": [
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.10-aws-ocp415-e2e-legacy-aws-s3",
+      "application": "quay-3-10",
+      "release": "quay-3.10",
+      "target": "aws-s3"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.12-aws-ocp417-e2e-legacy-aws-s3",
+      "application": "quay-3-12",
+      "release": "quay-3.12",
+      "target": "aws-s3"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.14-aws-ocp419-e2e-legacy-aws-s3",
+      "application": "quay-3-14",
+      "release": "quay-3.14",
+      "target": "aws-s3"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.15-aws-ocp419-e2e-legacy-aws-s3",
+      "application": "quay-3-15",
+      "release": "quay-3.15",
+      "target": "aws-s3"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.16-aws-ocp421-e2e-install-aws-odf-nightly",
+      "application": "quay-3-16",
+      "release": "quay-3.16",
+      "target": "aws-odf-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.16-aws-ocp421-e2e-install-aws-s3-nightly",
+      "application": "quay-3-16",
+      "release": "quay-3.16",
+      "target": "aws-s3-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.16-azure-ocp421-e2e-install-azure-blob-nightly",
+      "application": "quay-3-16",
+      "release": "quay-3.16",
+      "target": "azure-blob-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.16-gcp-ocp421-e2e-install-gcp-gcs-nightly",
+      "application": "quay-3-16",
+      "release": "quay-3.16",
+      "target": "gcp-gcs-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.17-aws-ocp422-e2e-install-aws-odf-nightly",
+      "application": "quay-3-17",
+      "release": "quay-3.17",
+      "target": "aws-odf-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.17-aws-ocp422-e2e-install-aws-s3-nightly",
+      "application": "quay-3-17",
+      "release": "quay-3.17",
+      "target": "aws-s3-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.17-aws-ocp422-e2e-install-aws-s3-nightly-fips",
+      "application": "quay-3-17",
+      "release": "quay-3.17",
+      "target": "aws-s3-nightly-fips"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.17-aws-ocp422-e2e-install-aws-s3-rds-nightly",
+      "application": "quay-3-17",
+      "release": "quay-3.17",
+      "target": "aws-s3-rds-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.17-aws-ocp422-s3-upgrade-from-316",
+      "application": "quay-3-17",
+      "release": "quay-3.17",
+      "target": "from-316"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.17-azure-ocp422-e2e-install-azure-blob-nightly",
+      "application": "quay-3-17",
+      "release": "quay-3.17",
+      "target": "azure-blob-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.17-azure-ocp422-e2e-install-azure-blob-postgres-nightly",
+      "application": "quay-3-17",
+      "release": "quay-3.17",
+      "target": "azure-blob-postgres-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.17-gcp-ocp422-e2e-install-gcp-gcs-nightly",
+      "application": "quay-3-17",
+      "release": "quay-3.17",
+      "target": "gcp-gcs-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.18-aws-arm64-ocp422-e2e-install-aws-s3-nightly",
+      "application": "quay-3-18",
+      "release": "quay-3.18",
+      "target": "aws-s3-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.18-aws-ocp414-e2e-install-aws-s3-nightly",
+      "application": "quay-3-18",
+      "release": "quay-3.18",
+      "target": "aws-s3-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.18-aws-ocp422-e2e-install-aws-odf-nightly",
+      "application": "quay-3-18",
+      "release": "quay-3.18",
+      "target": "aws-odf-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.18-aws-ocp422-e2e-install-aws-s3-nightly",
+      "application": "quay-3-18",
+      "release": "quay-3.18",
+      "target": "aws-s3-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.18-aws-ocp422-e2e-install-aws-s3-nightly-fips",
+      "application": "quay-3-18",
+      "release": "quay-3.18",
+      "target": "aws-s3-nightly-fips"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.18-aws-ocp422-e2e-install-aws-s3-rds-nightly",
+      "application": "quay-3-18",
+      "release": "quay-3.18",
+      "target": "aws-s3-rds-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.18-aws-ocp422-s3-upgrade-from-317",
+      "application": "quay-3-18",
+      "release": "quay-3.18",
+      "target": "from-317"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.18-aws-ocp50-e2e-install-aws-s3-nightly",
+      "application": "quay-3-18",
+      "release": "quay-3.18",
+      "target": "aws-s3-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.18-aws-ocp50-e2e-install-aws-s3-nightly-dualstack",
+      "application": "quay-3-18",
+      "release": "quay-3.18",
+      "target": "aws-s3-nightly-dualstack"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.18-aws-standalone-ha-e2e",
+      "application": "quay-3-18",
+      "release": "quay-3.18",
+      "target": "e2e"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.18-azure-ocp422-e2e-install-azure-blob-nightly",
+      "application": "quay-3-18",
+      "release": "quay-3.18",
+      "target": "azure-blob-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.18-azure-ocp422-e2e-install-azure-blob-postgres-nightly",
+      "application": "quay-3-18",
+      "release": "quay-3.18",
+      "target": "azure-blob-postgres-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.18-gcp-ocp422-e2e-install-gcp-gcs-nightly",
+      "application": "quay-3-18",
+      "release": "quay-3.18",
+      "target": "gcp-gcs-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.18-libvirt-s390x-ocp422-e2e-install-libvirt-s3-nightly",
+      "application": "quay-3-18",
+      "release": "quay-3.18",
+      "target": "libvirt-s3-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-3.9-aws-ocp414-e2e-legacy-aws-s3",
+      "application": "quay-3-9",
+      "release": "quay-3.9",
+      "target": "aws-s3"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-5.0-aws-arm64-ocp50-e2e-install-aws-s3-nightly",
+      "application": "quay-5-0",
+      "release": "quay-5.0",
+      "target": "aws-s3-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-5.0-aws-metal-ocp50-e2e-install-aws-metal-s3-nightly",
+      "application": "quay-5-0",
+      "release": "quay-5.0",
+      "target": "aws-metal-s3-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-5.0-aws-ocp50-e2e-install-aws-odf-nightly",
+      "application": "quay-5-0",
+      "release": "quay-5.0",
+      "target": "aws-odf-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-5.0-aws-ocp50-e2e-install-aws-s3-nightly",
+      "application": "quay-5-0",
+      "release": "quay-5.0",
+      "target": "aws-s3-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-5.0-aws-ocp50-e2e-install-aws-s3-nightly-fips",
+      "application": "quay-5-0",
+      "release": "quay-5.0",
+      "target": "aws-s3-nightly-fips"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-5.0-aws-ocp50-e2e-install-aws-s3-rds-nightly",
+      "application": "quay-5-0",
+      "release": "quay-5.0",
+      "target": "aws-s3-rds-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-5.0-aws-ocp50-s3-upgrade-from-318",
+      "application": "quay-5-0",
+      "release": "quay-5.0",
+      "target": "from-318"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-5.0-azure-ocp50-e2e-install-azure-blob-nightly",
+      "application": "quay-5-0",
+      "release": "quay-5.0",
+      "target": "azure-blob-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-5.0-azure-ocp50-e2e-install-azure-blob-postgres-nightly",
+      "application": "quay-5-0",
+      "release": "quay-5.0",
+      "target": "azure-blob-postgres-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-redhat-5.0-gcp-ocp50-e2e-install-gcp-gcs-nightly",
+      "application": "quay-5-0",
+      "release": "quay-5.0",
+      "target": "gcp-gcs-nightly"
+    },
+    {
+      "name": "periodic-ci-quay-quay-operator-redhat-5.0-aws-ocp50-e2e-chainsaw-aws-odf-nightly",
+      "application": "quay-5-0",
+      "release": "quay-5.0",
+      "target": "aws-odf-nightly"
+    }
+  ]
+}
