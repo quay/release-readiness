@@ -106,6 +106,22 @@ type ProwInstallFailure struct {
 	BuildID string
 }
 
+type ProwInventoryState struct {
+	ID       int64
+	Revision string
+}
+
+type ProwJobConfig struct {
+	JobName     string
+	Application string
+	Target      string
+	Revision    string
+	SourceUrl   string
+	Ocp         string
+	Cloud       string
+	Removed     int64
+}
+
 type ProwRun struct {
 	JobName       string
 	BuildID       string

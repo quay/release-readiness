@@ -35,6 +35,7 @@ type Source struct {
 	lastSuccess  time.Time
 	lastError    string
 	failingSince time.Time
+	idleReason   string
 }
 
 // Problem is a source whose last pass failed or that has gone stale.
@@ -47,6 +48,7 @@ type Problem struct {
 
 // Freshness is a source's last successful pass, nil if it has had none.
 type Freshness struct {
+	IdleReason  string     `json:"idle_reason,omitempty"`
 	Source      string     `json:"source"`
 	LastSuccess *time.Time `json:"last_success"`
 }
@@ -82,6 +84,7 @@ func (s *Source) Report(err error) {
 	}
 	s.r.mu.Lock()
 	now, save := s.r.now().UTC(), s.r.save
+	s.idleReason = ""
 	if err == nil {
 		s.lastSuccess = now
 		s.failingSince = time.Time{}
@@ -96,6 +99,19 @@ func (s *Source) Report(err error) {
 	if err == nil && save != nil {
 		save(s.name, now)
 	}
+}
+
+// Idle records that a collector has no eligible work, without inventing a
+// successful fetch. It suppresses staleness while idle; Report resumes tracking.
+func (s *Source) Idle(reason string) {
+	if s == nil {
+		return
+	}
+	s.r.mu.Lock()
+	defer s.r.mu.Unlock()
+	s.idleReason = reason
+	s.failingSince = time.Time{}
+	s.started = s.r.now().UTC()
 }
 
 // Problems lists the failing or stale sources, sorted by source.
@@ -117,7 +133,7 @@ func (r *Registry) Sources() []Freshness {
 	defer r.mu.Unlock()
 	out := make([]Freshness, len(r.sources))
 	for i, s := range r.sources {
-		out[i] = Freshness{Source: s.name, LastSuccess: ptr(s.lastSuccess)}
+		out[i] = Freshness{Source: s.name, LastSuccess: ptr(s.lastSuccess), IdleReason: s.idleReason}
 	}
 	return out
 }
@@ -130,6 +146,9 @@ func (r *Registry) Tracks(source string) bool {
 }
 
 func (s *Source) problem(now time.Time) (Problem, bool) {
+	if s.idleReason != "" {
+		return Problem{}, false
+	}
 	p := Problem{Source: s.name, Since: ptr(s.failingSince), LastSuccess: ptr(s.lastSuccess)}
 	if !s.failingSince.IsZero() {
 		p.Message = s.lastError

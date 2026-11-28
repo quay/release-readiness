@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/quay/release-readiness/internal/model"
 	"github.com/quay/release-readiness/internal/syncstatus"
+	"github.com/quay/release-readiness/internal/workpool"
 )
 
 // Store is the subset of the database layer needed by the JIRA syncer.
@@ -29,12 +31,17 @@ type Syncer struct {
 	withTx TxFunc
 	logger *slog.Logger
 	// Status receives each pass's outcome; nil reports nowhere.
-	Status *syncstatus.Source
+	Status  *syncstatus.Source
+	Workers int
 }
+
+// releasedDiscoveryWindow bounds how far back closed release tickets are
+// discovered each pass: old z-streams beyond it stay undiscovered.
+const releasedDiscoveryWindow = 180 * 24 * time.Hour
 
 // NewSyncer creates a Syncer that uses client to fetch data and store to persist it.
 func NewSyncer(client *Client, store Store, withTx TxFunc, logger *slog.Logger) *Syncer {
-	return &Syncer{client: client, store: store, withTx: withTx, logger: logger}
+	return &Syncer{client: client, store: store, withTx: withTx, logger: logger, Workers: 2}
 }
 
 // Run performs an immediate sync and then repeats every interval until ctx is cancelled.
@@ -89,6 +96,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 	}
 
 	activeSet := make(map[string]bool, len(releases))
+	var scopes []string
 
 	for _, rel := range releases {
 		activeSet[rel.FixVersion] = true
@@ -120,7 +128,53 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 			pass.Add(fmt.Errorf("upsert version %s: %w", rel.FixVersion, err))
 		}
 
-		pass.Add(s.syncVersion(ctx, rel.FixVersion))
+		if !slices.Contains(scopes, rel.FixVersion) {
+			scopes = append(scopes, rel.FixVersion)
+		}
+	}
+
+	// Backfill versions whose release ticket closed before this app first
+	// ran: without a row, the reconciliation below cannot see them, and the
+	// portfolio's history and available stage stay empty on a fresh
+	// database. The JIRA project version list stays the authority for the
+	// released flag; a closed ticket is the evidence when it lacks the
+	// version.
+	released, releasedErr := s.client.DiscoverReleasedReleases(ctx, releasedDiscoveryWindow)
+	if releasedErr != nil {
+		s.logger.Error("discover released releases", "error", releasedErr)
+		pass.Add(fmt.Errorf("discover released releases: %w", releasedErr))
+	} else {
+		s.logger.Info("discovered released releases", "count", len(released))
+		for _, rel := range released {
+			if activeSet[rel.FixVersion] {
+				continue
+			}
+			rv := &model.ReleaseVersion{
+				Name:                  rel.FixVersion,
+				ReleaseTicketKey:      rel.ReleaseTicketKey,
+				ReleaseTicketAssignee: rel.Assignee,
+				KonfluxApplication:    rel.KonfluxApplication,
+			}
+			// A closed release ticket is the release evidence. The project
+			// version list often leaves shipped versions unreleased, so it
+			// only contributes metadata here, never a veto.
+			rv.Released = true
+			if versionInfo, ok := versions[rel.FixVersion]; ok {
+				rv.Archived = versionInfo.Archived
+				if t, err := time.Parse(time.DateOnly, versionInfo.ReleaseDate); err == nil {
+					rv.ReleaseDate = &t
+				}
+			} else {
+				// The reconciliation below syncs issues only for versions
+				// the project list knows; this one exists by its closed
+				// ticket alone, so scope it here.
+				scopes = append(scopes, rel.FixVersion)
+			}
+			if err := s.store.UpsertReleaseVersion(ctx, rv); err != nil {
+				s.logger.Error("upsert released version", "version", rel.FixVersion, "error", err)
+				pass.Add(fmt.Errorf("upsert version %s: %w", rel.FixVersion, err))
+			}
+		}
 	}
 
 	// Keep syncing versions whose tracking ticket closed (dropped from
@@ -140,7 +194,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 		if !ok {
 			continue
 		}
-		dbv.Released = versionInfo.Released
+		dbv.Released = dbv.Released || versionInfo.Released
 		dbv.Archived = versionInfo.Archived
 		if t, err := time.Parse(time.DateOnly, versionInfo.ReleaseDate); err == nil {
 			dbv.ReleaseDate = &t
@@ -149,8 +203,15 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 			s.logger.Error("upsert version", "version", dbv.Name, "error", err)
 			pass.Add(fmt.Errorf("upsert version %s: %w", dbv.Name, err))
 		}
-		pass.Add(s.syncVersion(ctx, dbv.Name))
+		scopes = append(scopes, dbv.Name)
 	}
+	pass.Add(workpool.Run(ctx, scopes, s.Workers, func(ctx context.Context, version string) ([]Issue, error) {
+		issues, err := s.client.SearchIssues(ctx, version)
+		if err != nil {
+			return nil, fmt.Errorf("search issues %s: %w", version, err)
+		}
+		return issues, nil
+	}, func(version string, issues []Issue) error { return s.storeVersion(ctx, version, issues) }))
 }
 
 // authError marks a rejected token, which every later pass will hit too.
@@ -161,14 +222,8 @@ func authError(err error) error {
 	return err
 }
 
-// syncVersion fetches all issues for a single fixVersion and upserts them.
-func (s *Syncer) syncVersion(ctx context.Context, fixVersion string) error {
-	issues, err := s.client.SearchIssues(ctx, fixVersion)
-	if err != nil {
-		s.logger.Error("search issues", "version", fixVersion, "error", err)
-		return fmt.Errorf("search issues %s: %w", fixVersion, err)
-	}
-
+// storeVersion atomically replaces a completely fetched issue scope.
+func (s *Syncer) storeVersion(ctx context.Context, fixVersion string, issues []Issue) error {
 	if err := s.withTx(ctx, func(txStore Store) error {
 		var keys []string
 		for _, issue := range issues {

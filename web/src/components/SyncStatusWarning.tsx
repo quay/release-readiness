@@ -9,7 +9,7 @@ import {
 	Tooltip,
 } from "@patternfly/react-core";
 import { ExclamationTriangleIcon, SyncAltIcon } from "@patternfly/react-icons";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getSyncStatus } from "../api/client";
 import type { SyncProblem } from "../api/types";
 import { useCachedFetch } from "../hooks/useCachedFetch";
@@ -20,17 +20,8 @@ const POLL_MS = 60_000;
 
 /** The sync status, polled; every caller shares the one cache entry. */
 export function useSyncStatus() {
-	// The TTL sits under the poll period so every tick refetches.
-	const { data, refetch } = useCachedFetch(
-		"sync-status",
-		getSyncStatus,
-		POLL_MS / 2,
-	);
-
-	useEffect(() => {
-		const id = setInterval(refetch, POLL_MS);
-		return () => clearInterval(id);
-	}, [refetch]);
+	// useCachedFetch owns polling; adding another timer duplicates requests.
+	const { data } = useCachedFetch("sync-status", getSyncStatus, POLL_MS);
 	return data;
 }
 
@@ -38,12 +29,15 @@ export function useSyncStatus() {
 const AFFECTS: Record<string, string> = {
 	konflux: "snapshots, releases, stage/prod status",
 	"art-builds": "builds",
-	"art-history": "builds",
+	"art-history": "Current-release builds",
+	"art-backfill": "Historical ART builds",
 	"fbc-render": "FBC bundles",
 	catalog: "shipped versions",
 	jira: "tickets",
 	"image-scans": "CVE scans",
-	prow: "CI runs",
+	prow: "Current-release CI runs",
+	"prow-history": "Historical CI evidence",
+	"prow-inventory": "Configured CI jobs",
 	"shipment-mrs": "shipment MRs",
 };
 
@@ -101,6 +95,26 @@ const exact = (iso: string) =>
 export default function SyncStatusWarning({ compact }: { compact?: boolean }) {
 	const status = useSyncStatus();
 	const iconRef = useRef<HTMLButtonElement>(null);
+	const warningRef = useRef<HTMLButtonElement>(null);
+	const [placement, setPlacement] = useState<"bottom-start" | "bottom-end">(
+		"bottom-end",
+	);
+	const [popoverWidth, setPopoverWidth] = useState(
+		"min(36rem, calc(100vw - 2rem))",
+	);
+	const fitPopover = useCallback(() => {
+		const trigger = compact ? iconRef.current : warningRef.current;
+		if (!trigger) return;
+		const rect = trigger.getBoundingClientRect();
+		const leftSpace = rect.right - 16;
+		const rightSpace = window.innerWidth - rect.left - 16;
+		setPlacement(leftSpace >= rightSpace ? "bottom-end" : "bottom-start");
+		setPopoverWidth(`min(36rem, ${Math.max(leftSpace, rightSpace)}px)`);
+	}, [compact]);
+	useEffect(() => {
+		window.addEventListener("resize", fitPopover);
+		return () => window.removeEventListener("resize", fitPopover);
+	}, [fitPopover]);
 	if (!status) return null;
 	const line = freshnessLine(status);
 	const n = line.problems.length;
@@ -137,6 +151,12 @@ export default function SyncStatusWarning({ compact }: { compact?: boolean }) {
 	if (compact) {
 		return (
 			<Popover
+				position={placement}
+				enableFlip={false}
+				maxWidth={popoverWidth}
+				onShow={fitPopover}
+				className="rr-source-popover"
+				triggerRef={iconRef}
 				headerContent={words}
 				bodyContent={
 					<Stack hasGutter>
@@ -162,10 +182,16 @@ export default function SyncStatusWarning({ compact }: { compact?: boolean }) {
 		>
 			{stale && (
 				<Popover
+					position={placement}
+					enableFlip={false}
+					maxWidth={popoverWidth}
+					onShow={fitPopover}
+					className="rr-source-popover"
 					headerContent="Sync problems"
 					bodyContent={<SyncProblems problems={line.problems} />}
 				>
 					<Button
+						ref={warningRef}
 						variant="link"
 						isInline
 						size="sm"

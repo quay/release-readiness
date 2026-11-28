@@ -2,6 +2,9 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 export default defineConfig({
+	// VITE_BASE bakes a URL prefix (e.g. /v2) into asset and module URLs;
+	// the server must be configured with the matching -base-path.
+	base: process.env.VITE_BASE || "/",
 	plugins: [react()],
 	build: {
 		outDir: "dist",

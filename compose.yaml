@@ -1,0 +1,44 @@
+# Local Docker Compose setup: builds deploy/Containerfile, mounts your kubeconfig
+# read-only, and loads JIRA credentials from .env (gitignored).
+#
+#   docker compose up -d --build
+#   docker compose logs -f
+#   docker compose down
+#
+# The app is then at http://localhost:8088. The SQLite DB persists in the
+# named volume `rr-data`.
+
+services:
+  release-readiness:
+    build:
+      context: .
+      dockerfile: deploy/Containerfile
+    ports:
+      - "127.0.0.1:${RR_PORT:-8088}:8080"
+    env_file:
+      - ${RR_ENV_FILE:-.env}
+    # Local bind mounts include the existing kubeconfig; do not relabel it.
+    security_opt:
+      - label=disable
+    environment:
+      # Kubeconfig is mounted below; without it the konflux sync falls back to
+      # the in-cluster service account, which does not exist outside Kubernetes.
+      KUBECONFIG: /kube/config
+      # Dynamic configs define coverage; Sippy indexes runs and GCS provides
+      # exact tested-image evidence. Set RR_SIPPY_URL='' for legacy ingestion.
+      PROW_JOB_DISCOVERY: ${RR_PROW_JOB_DISCOVERY:-true}
+      SIPPY_URL: ${RR_SIPPY_URL-https://sippy.dptools.openshift.org}
+      # Local review must not write release changes to external systems.
+      JIRA_WRITE: "false"
+      # Explicit ART inventory; independent of snapshots and JIRA availability.
+      ART_GROUPS: ${RR_ART_GROUPS:-quay-3.9,quay-3.10,quay-3.12,quay-3.14,quay-3.15,quay-3.16,quay-3.17,quay-3.18,quay-5.0}
+    command: ["-addr", ":8080", "-db", "/data/release-readiness.db", "-prow-interval", "2m"]
+    volumes:
+      # Live kubeconfig from `oc login` (token expires ~24h; re-login on the
+      # host and restart the container when the konflux sync starts failing).
+      - ${KONFLUX_KUBECONFIG:-${HOME}/.kube/config}:/kube/config:ro
+      - ${RR_DATA_DIR:-rr-data}:/data
+    restart: unless-stopped
+
+volumes:
+  rr-data:

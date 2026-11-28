@@ -51,6 +51,8 @@ var ErrOperandUnavailable = errors.New("operand not listed by ART build history"
 // errNoSuccess is a search that succeeded without a successful matching row.
 var errNoSuccess = errors.New("no successful build")
 
+var errWaitingForStreams = errors.New("ART history waiting for streams: set -art-groups or ART_GROUPS, or store Konflux snapshots")
+
 // HistoryBuild is a successful ART build record, with the source commit ART
 // built from. StartTime is as ART gives it.
 type HistoryBuild struct {
@@ -83,6 +85,11 @@ type HistoryStore interface {
 // everything it names is, so a stored bundle is closed. An FBC is stored
 // even when a bundle it names is skipped for ErrOperandUnavailable.
 type HistorySync struct {
+	// Groups is the configured ART inventory: the guaranteed floor of the
+	// union each pass scans, independent of JIRA and Konflux. Groups derived
+	// from stored Konflux snapshot applications are added to it, so the union
+	// can only grow beyond the floor, never shrink below it.
+	Groups []string
 	client *Client
 	store  HistoryStore
 	logger *slog.Logger
@@ -90,7 +97,13 @@ type HistorySync struct {
 	// pace spaces out requests, CloseBundle's included.
 	pace *time.Ticker
 	// Status receives each pass's outcome; nil reports nowhere.
-	Status *syncstatus.Source
+	Status                                             *syncstatus.Source
+	Activity                                           func(context.Context) (map[string]bool, error)
+	ForegroundBudget, BackfillBudget, BackfillInterval time.Duration
+	BackfillStatus                                     *syncstatus.Source
+	lastBackfill                                       time.Time
+	foregroundCursor                                   int
+	backfillCursor                                     int
 }
 
 func NewHistorySync(client *Client, store HistoryStore, logger *slog.Logger) *HistorySync {
@@ -113,26 +126,52 @@ func (h *HistorySync) Run(ctx context.Context, interval time.Duration) {
 	}
 }
 
-// SyncOnce scans, for each stream with a stored Snapshot, the newest
-// refreshDays and up to backfillPerPass older unscanned days, newest first.
-// A day is marked scanned only once all its successful FBC builds are stored.
-// It then reads the source repo of up to sourcesPerPass stored records that
-// lack one.
-func (h *HistorySync) SyncOnce(ctx context.Context) {
-	var pass syncstatus.Pass
-	defer func() { h.Status.Report(pass.Err()) }()
+// unionGroups returns the configured groups plus those derived from the
+// applications of stored Konflux snapshots (an application quay-3-18 names the
+// group quay-3.18): the configured list is the guaranteed floor and discovery
+// only ever adds to it, never removes from it. A discovery failure is logged
+// and ignored when configured groups exist, so a Konflux outage cannot stop
+// ART history; it fails the pass only when it leaves nothing to scan.
+func (h *HistorySync) unionGroups(ctx context.Context, pass *syncstatus.Pass) []string {
+	groups := slices.Clone(h.Groups)
 	apps, err := h.store.ListSnapshotApplications(ctx)
 	if err != nil {
-		pass.Add(fmt.Errorf("list applications: %w", err))
-		return
+		if len(groups) > 0 {
+			h.logger.Warn("ART group discovery from snapshots failed; scanning configured groups only", "error", err)
+			return groups
+		}
+		pass.Add(fmt.Errorf("list snapshot applications: %w", err))
+		return nil
 	}
-	var groups []string
 	for _, a := range apps {
 		if m := quayStream.FindStringSubmatch(a); m != nil {
 			if g := "quay-" + m[1] + "." + m[2]; !slices.Contains(groups, g) {
 				groups = append(groups, g)
 			}
 		}
+	}
+	slices.Sort(groups)
+	return groups
+}
+
+// SyncOnce scans, for each stream of the union of the configured groups and
+// those derived from stored snapshots, the newest refreshDays and up to
+// backfillPerPass older unscanned days, newest first.
+// A day is marked scanned only once all its successful FBC builds are stored.
+// It then reads the source repo of up to sourcesPerPass stored records that
+// lack one.
+func (h *HistorySync) SyncOnce(ctx context.Context) {
+	if h.Activity != nil {
+		h.syncPrioritized(ctx)
+		return
+	}
+	var pass syncstatus.Pass
+	defer func() { h.Status.Report(pass.Err()) }()
+	groups := h.unionGroups(ctx, &pass)
+	if len(groups) == 0 {
+		pass.Add(errWaitingForStreams)
+		h.logger.Info("ART waiting for stream discovery")
+		return
 	}
 	today := h.now().UTC()
 	// Each group's days to scan, newest first.

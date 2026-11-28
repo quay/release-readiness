@@ -410,7 +410,8 @@ func TestComputeReadiness(t *testing.T) {
 		want           model.ReadinessResponse
 	}{
 		{"released in JIRA", true, false, model.ReadinessResponse{Signal: "green", Message: "Released"}},
-		{"catalog-shipped, JIRA unreleased", false, true, model.ReadinessResponse{Signal: "green", Message: "Shipped"}},
+		{"released in JIRA, catalog confirmed", true, true, model.ReadinessResponse{Signal: "green", Message: "Released"}},
+		{"catalog push only, JIRA unreleased", false, true, model.ReadinessResponse{Signal: "red", Message: "Past due date"}},
 		{"unshipped past due", false, false, model.ReadinessResponse{Signal: "red", Message: "Past due date"}},
 	} {
 		t.Run(tc.desc, func(t *testing.T) {
@@ -514,9 +515,11 @@ func TestReleasesOverviewShipped(t *testing.T) {
 
 	var overviews []model.ReleaseOverview
 	getJSON(t, srv, "/api/v1/releases/overview", http.StatusOK, &overviews)
+	// 3.17.5's catalog push does not release it: it stays the stream's
+	// next release ahead of 3.17.6.
 	want := map[string]bool{
-		"quay-v3.17.5": false,
-		"quay-v3.17.6": true,
+		"quay-v3.17.5": true,
+		"quay-v3.17.6": false,
 		"quay-v3.18.0": false,
 		"quay-v3.18.1": true,
 	}

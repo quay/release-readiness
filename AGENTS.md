@@ -9,8 +9,9 @@ an embedded React/PatternFly SPA, backed by SQLite. Background sync loops read
 Konflux Snapshots and Releases through the Kubernetes API, ART build history,
 FBC images, the Red Hat container catalog, Prow periodics, CVE scans from
 Tekton Results, and JIRA issues per release; one binary serves the REST API
-(`/api/v1/`) and the SPA. `README.md` is the reference for what each source
-ingests and what the API fields mean.
+(`/api/v1/`) and the SPA. `README.md` covers setup, building, and testing;
+`docs/` contains the architecture, source synchronization, release semantics,
+and CLI reference.
 
 ## Build, test, lint
 
@@ -60,11 +61,9 @@ Flags (env fallback in parentheses; defaults point at production services):
   (`JIRA_WRITE_TOKEN`), a credential separate from the read one, are set.
 - `-art-build-history-url`, `-tekton-results-url`, `-catalog-url`,
   `-art-fbc-quay-url`: empty disables that source.
-- Prow: `-prow-jobs` (`PROW_JOBS`, `job_name=konflux_application[,...]`),
-  `-prow-job-pattern` (`PROW_JOB_PATTERN`, a `^`-anchored job name regexp
-  whose `major` and `minor` groups give the application
-  `quay-<major>-<minor>`; a `-prow-jobs` entry for the same job wins),
-  `-prow-interval`.
+- Prow: `-prow-job-discovery` (`PROW_JOB_DISCOVERY`) imports the required
+  periodic jobs from openshift/release; CI ingestion is candidate-gated and
+  starts only for streams with a dated FBC. `-prow-interval`.
 - Shipment MRs: `-gitlab-url` (empty disables), `-gitlab-token`
   (`GITLAB_TOKEN`; empty reads anonymously), `-shipment-project`,
   `-ocp-build-data-url`, `-gitlab-poll-interval`.
@@ -74,8 +73,9 @@ Flags (env fallback in parentheses; defaults point at production services):
   needs, and the age past which Konflux and Prow skip it on ingest.
 
 `cmd/release-readiness/main.go` is the source of truth for the flag set.
-`dev/shots.py` takes full-page screenshots of a running instance (see
-`dev/README.md`).
+`web/e2e/` owns Playwright tests and TypeScript screenshot, accessibility, and
+comparison tools (see `web/e2e/README.md`). Run `npm run typecheck:e2e` and
+`npm run test:e2e` from `web/` for changes there.
 
 ## Layout
 
@@ -98,8 +98,9 @@ Flags (env fallback in parentheses; defaults point at production services):
 | `internal/syncstatus/` | Per-source last success and failure tracking |
 | `internal/model/` | Shared data types |
 | `web/` | React 19 + TypeScript SPA, PatternFly 6, Vite 8; API client `web/src/api/client.ts`, pages in `web/src/pages/` |
-| `deploy/` | Kubernetes manifests (Deployment, Service, Route, PVC, RBAC) and `Containerfile` |
-| `dev/` | Local dev tooling, one line each in `dev/README.md` |
+| `deploy/` | OpenShift Kustomize base/generator, RBAC, and `Containerfile` |
+| `docs/` | Architecture, release workflow, synchronization, and CLI reference |
+| `web/e2e/` | Browser tests, shared fixtures/helpers, and TypeScript review tools |
 | `.github/workflows/` | CI: Go lint+test, web lint+build, image build; sqlc diff |
 | `.tekton/` | Konflux pipeline definitions |
 
@@ -113,7 +114,7 @@ Each loop is started in `main.go` only when its inputs are set:
 | JIRA (`jira`) | `-jira-token` is set |
 | ART build resolve and history, FBC render, FBC JIRA reconciler (`art-builds`, `art-history`, `fbc-render`, `reconcile`) | `-art-build-history-url` is set |
 | Catalog (`catalog`) | `-catalog-url` is set |
-| Prow (`prow`) | `-prow-jobs` names a job or `-prow-job-pattern` is set |
+| Prow (`prow`) | `-prow-job-discovery` is set |
 | GitLab shipment MRs (`shipment-mrs`) | `-gitlab-url` is set |
 | Retention prune (`retention`) | `-retention` is above 0 |
 | Image scans (`image-scans`) | `-tekton-results-url` is set, the kube client exists, ART is enabled, and the credential has a bearer token |
@@ -153,8 +154,8 @@ upgrade in place.
 - `deploy/rbac.yaml`'s Role and RoleBinding must live in the Konflux namespace
   the app reads; they grant list on Snapshots and Releases and get/list on
   Tekton Results `results` and `records`.
-- The SQLite DB is persisted on the PVC. Delete the old DB file when upgrading
-  across the move to the Kubernetes source.
+- The SQLite DB is persisted on the PVC. Back it up before upgrades; supported
+  databases migrate in place. Do not delete it as a routine upgrade step.
 
 ## Conventions
 

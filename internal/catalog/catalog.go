@@ -106,16 +106,20 @@ func (c *Client) get(ctx context.Context, path string, v any) error {
 // Shipped holds the published versions of each product in memory, refreshed
 // in the background so requests never wait on the catalog.
 type Shipped struct {
-	client   *Client
-	logger   *slog.Logger
-	mu       sync.RWMutex
-	versions map[string]time.Time // "product X.Y.Z" to its first push
+	client        *Client
+	logger        *slog.Logger
+	mu            sync.RWMutex
+	refreshedAt   time.Time
+	refreshFailed bool
+	ready         chan struct{}
+	readyOnce     sync.Once
+	versions      map[string]time.Time // "product X.Y.Z" to its first push
 	// Status receives each refresh's outcome; nil reports nowhere.
 	Status *syncstatus.Source
 }
 
 func NewShipped(client *Client, logger *slog.Logger) *Shipped {
-	return &Shipped{client: client, logger: logger}
+	return &Shipped{client: client, logger: logger, ready: make(chan struct{})}
 }
 
 // Run refreshes immediately and then every interval until ctx is cancelled.
@@ -136,12 +140,16 @@ func (s *Shipped) Run(ctx context.Context, interval time.Duration) {
 // Refresh replaces the published set only when every repository was read,
 // so a failed pass keeps the last good one.
 func (s *Shipped) Refresh(ctx context.Context) {
+	defer s.readyOnce.Do(func() { close(s.ready) })
 	versions := make(map[string]time.Time)
 	dates := make(map[string]time.Time)
 	for product, repos := range Repositories {
 		for _, repo := range repos {
 			tags, err := s.client.PublishedTags(ctx, repo)
 			if err != nil {
+				s.mu.Lock()
+				s.refreshFailed = true
+				s.mu.Unlock()
 				s.logger.Warn("catalog refresh", "repository", repo, "error", err)
 				s.Status.Report(fmt.Errorf("read %s: %w", repo, err))
 				return
@@ -167,6 +175,8 @@ func (s *Shipped) Refresh(ctx context.Context) {
 	}
 	s.mu.Lock()
 	s.versions = versions
+	s.refreshedAt = time.Now()
+	s.refreshFailed = false
 	s.mu.Unlock()
 	s.Status.Report(nil)
 	s.logger.Info("catalog refreshed", "tags", len(versions))
@@ -190,4 +200,29 @@ func (s *Shipped) ShippedAt(product, version string) (time.Time, bool) {
 	defer s.mu.RUnlock()
 	at, ok := s.versions[product+" "+version]
 	return at, ok
+}
+
+// WaitForInitial prevents the first scheduling pass from treating every stream
+// as new while the initial catalog refresh is still in flight.
+func (s *Shipped) WaitForInitial(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	select {
+	case <-s.ready:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Fresh is deliberately stricter than the UI's retained publication cache.
+// Failed, uninitialized, or old publication data must not demote current work.
+func (s *Shipped) Fresh(now time.Time) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return !s.refreshFailed && !s.refreshedAt.IsZero() && now.Sub(s.refreshedAt) < 3*time.Hour
 }

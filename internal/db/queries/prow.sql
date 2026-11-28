@@ -47,3 +47,25 @@ ORDER BY i.id;
 SELECT build_id, started_at FROM prow_runs
 WHERE job_name = ?
 ORDER BY started_at DESC, build_id DESC;
+
+-- name: ListCIHistory :many
+-- Read a bounded page without loading image payloads or all application runs.
+WITH selected AS (SELECT CAST(sqlc.arg(selected_json) AS TEXT) AS digests)
+SELECT r.job_name, r.build_id, r.state, r.started_at, r.completed_at,
+       r.prow_url, r.artifact_state, r.catalog_ref,
+       f.build_id IS NOT NULL AS install_failed,
+       CAST(COALESCE((SELECT MAX(h.nvr) FROM art_history_records h
+         WHERE h.build_type = 'fbc'
+           AND h.digest = substr(r.catalog_ref, instr(r.catalog_ref, '@') + 1)), '') AS TEXT) AS fbc_nvr
+FROM prow_runs r
+LEFT JOIN prow_install_failures f ON f.job_name = r.job_name AND f.build_id = r.build_id
+WHERE r.application = sqlc.arg(application)
+  AND (sqlc.arg(job) = '' OR r.job_name = sqlc.arg(job))
+  AND (sqlc.arg(include_other) = 1 OR (
+    r.artifact_state = 'present' AND instr(r.catalog_ref, '@sha256:') > 0
+    AND substr(r.catalog_ref, instr(r.catalog_ref, '@') + 1)
+        IN (SELECT value FROM selected, json_each(selected.digests))))
+  AND (sqlc.arg(first_page) = 1 OR
+    (r.started_at, r.job_name, r.build_id) < (sqlc.arg(before_start), sqlc.arg(before_job), sqlc.arg(before_id)))
+ORDER BY r.started_at DESC, r.job_name DESC, r.build_id DESC
+LIMIT sqlc.arg(page_size);

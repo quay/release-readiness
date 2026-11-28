@@ -26,6 +26,7 @@ import {
 import { lazy, Suspense, useEffect, useState } from "react";
 import {
 	BrowserRouter,
+	Link,
 	Navigate,
 	Route,
 	Routes,
@@ -33,15 +34,15 @@ import {
 	useSearchParams,
 } from "react-router-dom";
 import "@patternfly/react-core/dist/styles/base.css";
+import { withBase } from "./api/client";
 import ErrorBoundary from "./components/ErrorBoundary";
 import SyncStatusWarning from "./components/SyncStatusWarning";
+import { useConfig } from "./hooks/useConfig";
+import "./readiness.css";
 import "./theme.css";
 
-const ReleasesOverview = lazy(() => import("./pages/ReleasesOverview"));
+const ReleasePortfolio = lazy(() => import("./pages/ReleasePortfolio"));
 const ReleaseDetail = lazy(() => import("./pages/ReleaseDetail"));
-// Dev builds only: the condition is false in a production build, so the
-// mockups chunk is never emitted.
-const Mockups = import.meta.env.DEV ? lazy(() => import("./mockups")) : null;
 
 const glossary: [string, string][] = [
 	[
@@ -77,6 +78,7 @@ function getInitialTheme(): Theme {
 
 function AppLayout({ children }: { children: React.ReactNode }) {
 	const [theme, setTheme] = useState<Theme>(getInitialTheme);
+	const config = useConfig();
 
 	useEffect(() => {
 		const root = document.documentElement;
@@ -91,12 +93,11 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 	const toggleTheme = () => setTheme((t) => (t === "light" ? "dark" : "light"));
 
 	const header = (
-		// Inline at every width, so phone width keeps the masthead on one row.
 		<Masthead display={{ default: "inline" }}>
 			<MastheadMain>
 				<MastheadBrand>
-					<a
-						href="/"
+					<Link
+						to="/"
 						style={{
 							color: "inherit",
 							textDecoration: "none",
@@ -106,9 +107,16 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 							gap: 8,
 						}}
 					>
-						<img src="/favicon.png" alt="Quay" style={{ height: 32 }} />
-						Release Readiness
-					</a>
+						<img
+							src={withBase(import.meta.env.BASE_URL, "favicon.png")}
+							alt="Quay"
+							style={{ height: 32 }}
+						/>
+						<span className="rr-brand-text">
+							Red Hat Quay
+							<small className="rr-brand-subtitle">Release readiness</small>
+						</span>
+					</Link>
 				</MastheadBrand>
 			</MastheadMain>
 			<MastheadContent>
@@ -128,7 +136,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 						</ToolbarItem>
 						<ToolbarItem>
 							<Popover
-								headerContent="About this dashboard"
+								headerContent={`Release readiness ${config?.app_version || "2.0.0-dev"}`}
 								maxWidth="36rem"
 								bodyContent={
 									<>
@@ -137,6 +145,15 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 											Snapshots and Releases, ART build history, Prow periodics,
 											Jira.
 										</Content>
+										<p>
+											<a
+												href="https://github.com/quay/release-readiness/issues/new"
+												target="_blank"
+												rel="noreferrer"
+											>
+												Send feedback or report an issue ↗
+											</a>
+										</p>
 										<DescriptionList isCompact style={{ marginTop: "1rem" }}>
 											{glossary.map(([term, desc]) => (
 												<DescriptionListGroup key={term}>
@@ -158,7 +175,16 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 						<ToolbarItem>
 							<Button
 								variant="plain"
-								aria-label="Toggle dark mode"
+								aria-label={
+									theme === "light"
+										? "Switch to dark theme"
+										: "Switch to light theme"
+								}
+								title={
+									theme === "light"
+										? "Switch to dark theme"
+										: "Switch to light theme"
+								}
 								onClick={toggleTheme}
 							>
 								{theme === "light" ? <MoonIcon /> : <SunIcon />}
@@ -213,23 +239,26 @@ function AppRoutes() {
 				}
 			>
 				<Routes>
-					<Route path="/" element={<ReleasesOverview />} />
+					<Route path="/" element={<ReleasePortfolio />} />
 					<Route path="/releases/:version" element={<ReleaseDetail />} />
 					<Route path="/releases/:version/ci" element={<CIRedirect />} />
 					<Route
 						path="/releases/:version/snapshots"
 						element={<Navigate to=".." relative="path" replace />}
 					/>
-					{Mockups && <Route path="/mockups/*" element={<Mockups />} />}
 				</Routes>
 			</Suspense>
 		</ErrorBoundary>
 	);
 }
 
+// Serve the router under the same prefix the bundle was built for.
+const routerBasename =
+	import.meta.env.BASE_URL === "/" ? undefined : import.meta.env.BASE_URL;
+
 export default function App() {
 	return (
-		<BrowserRouter>
+		<BrowserRouter basename={routerBasename}>
 			<AppLayout>
 				<AppRoutes />
 			</AppLayout>

@@ -41,10 +41,12 @@ jobs:
       - run: npm ci
 
       - name: Biome lint
-        run: npx biome ci src/
+        run: npx biome ci src/ e2e/ playwright.config.ts
 
       - name: TypeScript check
-        run: npx tsc --noEmit
+        run: |
+          npx tsc --noEmit
+          npm run typecheck:e2e
 
       - name: Build
         run: npx vite build

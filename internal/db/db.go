@@ -16,6 +16,9 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
+//go:embed 002_prow_inventory.sql
+var prowInventorySQL string
+
 type DB struct {
 	conn *sql.DB
 	dbtx dbsqlc.DBTX
@@ -40,6 +43,7 @@ func Open(path string) (*DB, error) {
 // changes.
 var migrations = []func(*sql.Tx) error{
 	baseline,
+	func(tx *sql.Tx) error { _, err := tx.Exec(prowInventorySQL); return err },
 }
 
 // baseline is idempotent so it also upgrades DBs from before user_version

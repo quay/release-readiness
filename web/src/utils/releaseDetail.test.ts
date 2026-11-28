@@ -25,7 +25,6 @@ import {
 	fbcGroups,
 	fbcNewerTitle,
 	fbcParams,
-	fbcPullspecs,
 	fbcPullspecsReason,
 	fbcsBuilt,
 	fbcTagList,
@@ -35,10 +34,7 @@ import {
 	fixableLabels,
 	freshnessLine,
 	issueLists,
-	jobLabel,
-	jobLabels,
 	jobShortName,
-	needsAttention,
 	noFbcText,
 	nvrLabel,
 	otherBundle,
@@ -83,40 +79,6 @@ test("jobShortName", () => {
 	assert.equal(
 		jobShortName("periodic-ci-quay-quay-tests-master-e2e"),
 		"periodic-ci-quay-quay-tests-master-e2e",
-	);
-});
-
-test("jobLabel keeps the arch", () => {
-	const job = (name: string) => `periodic-ci-quay-quay-redhat-3.18-${name}`;
-	assert.equal(
-		jobLabel(job("libvirt-s390x-ocp422-e2e-install-libvirt-s3-nightly")),
-		"libvirt-s390x-ocp422-libvirt-s3",
-	);
-	assert.equal(
-		jobLabel(job("aws-arm64-ocp422-e2e-install-aws-s3-nightly")),
-		"aws-arm64-ocp422-aws-s3",
-	);
-});
-
-test("jobLabels", () => {
-	const job = (name: string) => `periodic-ci-quay-quay-redhat-3.18-${name}`;
-	assert.deepEqual(
-		jobLabels([
-			job("libvirt-s390x-ocp422-e2e-install-libvirt-s3-nightly"),
-			job("aws-arm64-ocp422-e2e-install-aws-s3-nightly"),
-			job("aws-ocp422-e2e-install-aws-s3-nightly-fips"),
-			job("gcp-ocp422-e2e-install-gcp-gcs"),
-			"periodic-ci-quay-quay-master-e2e-install-aws-s3",
-			"periodic-ci-quay-quay-tests-master-e2e",
-		]),
-		[
-			"libvirt-s390x-ocp422-libvirt-s3",
-			"aws-arm64-ocp422-aws-s3",
-			"aws-ocp422-aws-s3-fips",
-			"gcp-ocp422-gcp-gcs",
-			"aws-s3",
-			"periodic-ci-quay-quay-tests-master-e2e",
-		],
 	);
 });
 
@@ -387,26 +349,6 @@ const fbcCandidate = (c: Partial<FBCCandidate>): FBCCandidate => ({
 	...c,
 });
 
-test("stream only, no stage (3.16): pullspecs from the stream", () => {
-	const head =
-		"quay-operator-metadata-container-3.16.7.202610121915.p2.ga4fe015.assembly.stream.el9-1";
-	const members = ["4.12", "4.14"].map((v) => fbcMember(v, head));
-	const c = fbcCandidate({
-		source: "stream",
-		operators: ["quay-operator", "container-security-operator"].map((o) =>
-			operatorFBC(o, head, members),
-		),
-		pullspecs: [members[0].pullspec, members[1].pullspec],
-	});
-	assert.equal(
-		fbcPullspecs(c),
-		"quay.io/art-fbc@sha256:4.12-" +
-			head +
-			",quay.io/art-fbc@sha256:4.14-" +
-			head,
-	);
-});
-
 test("fbcPullspecsReason names each unavailable candidate state", () => {
 	assert.equal(
 		fbcPullspecsReason(null),
@@ -463,7 +405,6 @@ test("missing operator (3.17.6): CSO and QBO not in stage show the stream's FBCs
 		source: "stream",
 		operators: [qo, streamCSO, streamQBO],
 	});
-	assert.equal(fbcPullspecs(c), null);
 	assert.deepEqual(slotRows(cso), [
 		{ ocp: "4.12", kind: "missing", fbc: null },
 		{ ocp: "4.14", kind: "missing", fbc: null },
@@ -497,12 +438,6 @@ test("mixed slots (CSO 7 on ...0313, 2 on ...1613): inconsistent, the others in 
 			conflicts: all.slice(0, 7).map((v) => fbcMember(v, other)),
 		},
 	);
-	const c = fbcCandidate({
-		state: "inconsistent",
-		operators: [cso],
-		pullspecs: ["x"],
-	});
-	assert.equal(fbcPullspecs(c), null);
 	const rows = slotRows(cso);
 	assert.deepEqual(
 		rows.map((r) => `${r.ocp} ${r.kind}`),
@@ -563,9 +498,16 @@ test("checking: nothing warns or fails", () => {
 	assert.deepEqual(
 		readingLine({ read: 87, failed: 2, pending: 0, history_days: 12 }),
 		{
-			status: "running",
-			text: "Reading build history, 12 days left · 2 unreadable",
+			status: "warning",
+			text: "2/89 FBCs unreadable",
 		},
+	);
+});
+
+test("history alone does not keep current FBC reading active", () => {
+	assert.equal(
+		readingLine({ read: 10, failed: 0, pending: 0, history_days: 111 }),
+		null,
 	);
 });
 
@@ -826,7 +768,7 @@ const image = (name: string, digest: string): OperatorImage => ({
 	scan: null,
 });
 
-test("fbcGroups and needsAttention: a failed stage, a flag or a failed run", () => {
+test("fbcGroups: a failed stage, a flag or a failed run", () => {
 	const head = bundle("202610061637");
 	const other = bundle("202610050101");
 	const ok = release({
@@ -907,10 +849,6 @@ test("fbcGroups and needsAttention: a failed stage, a flag or a failed run", () 
 			[],
 			["sha256:b", "sha256:q"],
 		],
-	);
-	assert.deepEqual(
-		g.rows.filter(needsAttention).map((r) => r.ocp),
-		["4.13", "4.14", "4.15", "4.16"],
 	);
 	const [stream] = fbcGroups({
 		...d,
@@ -1060,6 +998,8 @@ test("freshnessLine", () => {
 		{ source: "art-history", last_success: ago(7) },
 		{ source: "konflux", last_success: ago(1) },
 		{ source: "fbc-render", last_success: null },
+		{ source: "art-backfill", last_success: ago(90) },
+		{ source: "prow-history", last_success: ago(70) },
 	];
 	// A source on its first pass has no age yet.
 	assert.deepEqual(freshnessLine({ problems: [], sources }), {

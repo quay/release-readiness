@@ -27,9 +27,6 @@ export interface Blocker {
 	links: BlockerLink[];
 }
 
-/** Blockers of one level, code, operator and why, counted as one. */
-export type BlockerGroup = Blocker & { count: number };
-
 // What blocks, by code, in a few words.
 const titles: Record<string, string> = {
 	not_staged: "Not staged",
@@ -135,41 +132,3 @@ export function blockers(
 		};
 	});
 }
-
-/**
- * Blockers of one level, code, operator and why as one, their OCPs and
- * distinct links joined. Each OCP's stage release can fail on its own task.
- */
-export function grouped(bs: Blocker[]): BlockerGroup[] {
-	const out = new Map<string, BlockerGroup>();
-	for (const b of bs) {
-		const key = `${b.level} ${b.code} ${b.operator} ${b.why}`;
-		const g = out.get(key);
-		if (g) {
-			g.count++;
-			g.ocps = [...g.ocps, ...b.ocps];
-			g.links = [
-				...g.links,
-				...b.links.filter((l) => !g.links.some((x) => x.href === l.href)),
-			];
-		} else out.set(key, { ...b, count: 1 });
-	}
-	return [...out.values()];
-}
-
-/** Grouped blockers, and grouped warnings and notes. */
-export function splitBlockers(bs: Blocker[]): {
-	blocking: BlockerGroup[];
-	rest: BlockerGroup[];
-} {
-	return {
-		blocking: grouped(bs.filter((b) => b.level === "blocker")),
-		rest: grouped(bs.filter((b) => b.level !== "blocker")),
-	};
-}
-
-/** Where a blocker is: "container-security-operator · OCP 4.17, 4.21". */
-export const where = (b: Blocker) =>
-	[b.operator || "Whole release", b.ocps.length && `OCP ${b.ocps.join(", ")}`]
-		.filter(Boolean)
-		.join(" · ");

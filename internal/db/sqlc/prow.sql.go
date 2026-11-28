@@ -73,6 +73,98 @@ func (q *Queries) InsertProwRunImage(ctx context.Context, arg InsertProwRunImage
 	return err
 }
 
+const listCIHistory = `-- name: ListCIHistory :many
+WITH selected AS (SELECT CAST(?9 AS TEXT) AS digests)
+SELECT r.job_name, r.build_id, r.state, r.started_at, r.completed_at,
+       r.prow_url, r.artifact_state, r.catalog_ref,
+       f.build_id IS NOT NULL AS install_failed,
+       CAST(COALESCE((SELECT MAX(h.nvr) FROM art_history_records h
+         WHERE h.build_type = 'fbc'
+           AND h.digest = substr(r.catalog_ref, instr(r.catalog_ref, '@') + 1)), '') AS TEXT) AS fbc_nvr
+FROM prow_runs r
+LEFT JOIN prow_install_failures f ON f.job_name = r.job_name AND f.build_id = r.build_id
+WHERE r.application = ?1
+  AND (?2 = '' OR r.job_name = ?2)
+  AND (?3 = 1 OR (
+    r.artifact_state = 'present' AND instr(r.catalog_ref, '@sha256:') > 0
+    AND substr(r.catalog_ref, instr(r.catalog_ref, '@') + 1)
+        IN (SELECT value FROM selected, json_each(selected.digests))))
+  AND (?4 = 1 OR
+    (r.started_at, r.job_name, r.build_id) < (?5, ?6, ?7))
+ORDER BY r.started_at DESC, r.job_name DESC, r.build_id DESC
+LIMIT ?8
+`
+
+type ListCIHistoryParams struct {
+	Application  string
+	Job          interface{}
+	IncludeOther interface{}
+	FirstPage    interface{}
+	BeforeStart  string
+	BeforeJob    string
+	BeforeID     string
+	PageSize     int64
+	SelectedJson string
+}
+
+type ListCIHistoryRow struct {
+	JobName       string
+	BuildID       string
+	State         string
+	StartedAt     string
+	CompletedAt   string
+	ProwUrl       string
+	ArtifactState string
+	CatalogRef    string
+	InstallFailed bool
+	FbcNvr        string
+}
+
+// Read a bounded page without loading image payloads or all application runs.
+func (q *Queries) ListCIHistory(ctx context.Context, arg ListCIHistoryParams) ([]ListCIHistoryRow, error) {
+	rows, err := q.db.QueryContext(ctx, listCIHistory,
+		arg.Application,
+		arg.Job,
+		arg.IncludeOther,
+		arg.FirstPage,
+		arg.BeforeStart,
+		arg.BeforeJob,
+		arg.BeforeID,
+		arg.PageSize,
+		arg.SelectedJson,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCIHistoryRow
+	for rows.Next() {
+		var i ListCIHistoryRow
+		if err := rows.Scan(
+			&i.JobName,
+			&i.BuildID,
+			&i.State,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.ProwUrl,
+			&i.ArtifactState,
+			&i.CatalogRef,
+			&i.InstallFailed,
+			&i.FbcNvr,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFinishedProwBuildIDs = `-- name: ListFinishedProwBuildIDs :many
 SELECT build_id FROM prow_runs WHERE job_name = ? AND completed_at != ''
 `

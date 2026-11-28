@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/quay/release-readiness/internal/workpool"
 	"io"
 	"net/http"
 	"net/url"
@@ -32,6 +33,7 @@ type Client struct {
 	token      string
 	project    string
 	httpClient *http.Client
+	pace       workpool.Pacer
 	minDelay   time.Duration // minimum delay between requests
 }
 
@@ -117,6 +119,48 @@ func ParseVersionFromSummary(summary string) (product, version string, ok bool) 
 	product = strings.ToLower(m[1])
 	version = m[2]
 	return product, version, true
+}
+
+// DiscoverReleasedReleases queries JIRA for release tickets closed within
+// window, so a version whose ticket closed before this app first ran still
+// gets a release row. Returns the same shape as DiscoverActiveReleases.
+func (c *Client) DiscoverReleasedReleases(ctx context.Context, window time.Duration) ([]ActiveRelease, error) {
+	days := int(window.Hours() / 24)
+	if days < 1 {
+		days = 1
+	}
+	jql := fmt.Sprintf(
+		`project=%s AND component="-area/release" AND status IN (Closed, Done) AND resolved >= -%dd`,
+		c.project, days,
+	)
+	allIssues, err := c.search(ctx, jql, "summary,duedate,assignee", "discover released releases")
+	if err != nil {
+		return nil, err
+	}
+
+	var releases []ActiveRelease
+	for _, issue := range allIssues {
+		product, version, ok := ParseVersionFromSummary(issue.Fields.Summary)
+		if !ok {
+			continue
+		}
+		fixVersion := product + "-v" + version
+		assignee := ""
+		if issue.Fields.Assignee != nil {
+			assignee = issue.Fields.Assignee.DisplayName
+		}
+		rel := ActiveRelease{
+			FixVersion:         fixVersion,
+			ReleaseTicketKey:   issue.Key,
+			Assignee:           assignee,
+			KonfluxApplication: FixVersionToKonfluxApp(fixVersion),
+		}
+		if t, err := time.Parse(time.DateOnly, issue.Fields.DueDate); err == nil {
+			rel.DueDate = &t
+		}
+		releases = append(releases, rel)
+	}
+	return releases, nil
 }
 
 // DiscoverActiveReleases queries JIRA for active release tickets using the -area/release component.
@@ -218,7 +262,10 @@ func (c *Client) doGetWithRetry(ctx context.Context, reqURL string) ([]byte, err
 	const maxRetries = 3
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		if attempt > 0 || c.minDelay > 0 {
+		if err := c.pace.Wait(ctx, c.minDelay); err != nil {
+			return nil, err
+		}
+		if attempt > 0 {
 			delay := c.minDelay
 			if attempt > 0 {
 				// Exponential backoff: 2s, 4s, 8s
